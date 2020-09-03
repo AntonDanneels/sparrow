@@ -1,31 +1,17 @@
 use std::collections::VecDeque;
 
-fn parse_png_header(data: &mut VecDeque<u8>) -> Result<(), String> {
-    let header = [137,80,78,71,13,10,26,10];
-
-    for byte in header.iter() {
-        let b = data.pop_front();
-        if b.is_none() {
-            return Err("Not enough data".to_string());
-        }
-        let b = b.unwrap();
-        if b != *byte as u8 {
-            return Err("Not a PNG file".to_string());
-        }
-    }
-
-    Ok(())
-}
-
 #[derive(Clone)]
 enum ChunkType {
+    /* Required */
     IHDR,
     PLTE,
     IDAT,
-    IEND
+    IEND,
+    /* Optional */
+    TEXT,
 }
 
-const fn to_u32(a: [u8;4]) -> u32 {
+const fn to_u32(a: [u8; 4]) -> u32 {
     let mut result: u32 = 0;
     result |= (a[0] as u32) << 8 * 3;
     result |= (a[1] as u32) << 8 * 2;
@@ -35,114 +21,203 @@ const fn to_u32(a: [u8;4]) -> u32 {
     result
 }
 
-fn get_chunk_type(data: &mut VecDeque<u8>) -> Result<(ChunkType, u32), String> {
-    if data.len() < 8 {
-        return Err("Not enough data to determine chunk header".to_string())
-    }
+#[derive(Debug)]
+struct Parser {
+    width: u32,
+    height: u32,
+    depth: u8,
+    colour_type: u8,
+    compression: u8,
+    filter: u8,
+    interlace: u8,
+    compressed_data: VecDeque<u8>,
 
-    let length = parse_uint(data)?;
-    let chunk_type = parse_uint(data)?;
+    decoded_data: Vec<u8>,
+    encoded_data: Vec<u8>,
+}
 
-    let headers: [(u32, ChunkType); 4] = [
-        (to_u32([73, 72, 68, 82]), ChunkType::IHDR),
-        (to_u32([80, 76, 84, 69]), ChunkType::PLTE),
-        (to_u32([73, 68, 65, 84]), ChunkType::IDAT),
-        (to_u32([73, 69, 78, 68]), ChunkType::IEND),
-    ];
-
-    for header in &headers {
-        if chunk_type == header.0 {
-            return Ok((header.1.clone(), length));
+impl Parser {
+    fn new() -> Parser {
+        Parser {
+            width: 0,
+            height: 0,
+            depth: 0,
+            colour_type: 0,
+            compression: 0,
+            filter: 0,
+            interlace: 0,
+            compressed_data: VecDeque::new(),
+            encoded_data: Vec::new(),
+            decoded_data: Vec::new(),
         }
     }
 
-    println!("{} {} {} {}",
-        chunk_type >> 24 & 0xff,
-        chunk_type >> 16 & 0xff,
-        chunk_type >> 8 & 0xff,
-        chunk_type & 0xff,
-            );
-    return Err("Unknown chunk header".to_string())
-}
+    fn parse(&mut self, data: Vec<u8>) -> Result<(), String> {
+        self.compressed_data = data.into_iter().collect();
 
-fn parse_uint(data: &mut VecDeque<u8>) -> Result<u32, String> {
-    let mut result: u32 = 0;
-    if data.len() < 4 {
-        return Err("Not enough data".to_string());
-    }
-    for i in 0..4 {
-        let byte = data.pop_front().unwrap() as u32;
-        result |= byte << 8 * (3 - i);
-    }
-
-    Ok(result)
-}
-
-fn parse_byte(data: &mut VecDeque<u8>) -> Result<u8, String> {
-    if data.len() < 1 {
-        return Err("Not enough data".to_string());
-    }
-
-    Ok(data.pop_front().unwrap())
-}
-
-fn parse_ihdr(data: &mut VecDeque<u8>, length: u32) -> Result<(), String> {
-
-    println!("Length: {}", length);
-    let w = parse_uint(data)?;
-    let h = parse_uint(data)?;
-    let depth = parse_byte(data)?;
-    let colour_type = parse_byte(data)?;
-    let compression = parse_byte(data)?;
-    let filter = parse_byte(data)?;
-    let interlace = parse_byte(data)?;
-
-    println!("{}x{}:{}", w, h, depth);
-    println!("colour_type: {}", colour_type);
-    println!("compression: {}", compression);
-    println!("filter: {}", filter);
-    println!("interlace: {}", interlace);
-
-    let crc = parse_uint(data)?;
-    println!("crc: {}", crc);
-
-    Ok(())
-}
-
-fn parse_idat(data: &mut VecDeque<u8>, length: u32) -> Result<(), String> {
-
-    Err("not implemented".to_string())
-}
-
-fn parse_plte(data: &mut VecDeque<u8>, length: u32) -> Result<(), String> {
-
-    Err("not implemented".to_string())
-}
-
-fn parse_iend(data: &mut VecDeque<u8>, length: u32) -> Result<(), String> {
-
-    Err("not implemented".to_string())
-}
-
-fn parse_chunk(data: &mut VecDeque<u8>) -> Result<(), String> {
-    let chunk_type = get_chunk_type(data);
-    if chunk_type.is_err() {
-        return Err("Failed to read a valid PNG chunk header".to_string());
-    }
-
-    let (chunk_type, length) = chunk_type.unwrap();
-    match chunk_type {
-        ChunkType::IHDR => {
-            parse_ihdr(data, length)
+        self.parse_png_header()?;
+        while self.compressed_data.len() > 0 {
+            println!("================================");
+            match self.parse_chunk() {
+                Ok(_) => {
+                    println!("Parsed chunk");
+                }
+                Err(e) => {
+                    println!("Error while parsing PNG: {}", e);
+                    panic!();
+                }
+            }
+            println!("Remaining: {}", self.compressed_data.len());
+            println!("================================");
         }
-        ChunkType::IDAT => {
-            parse_idat(data, length)
+
+        Ok(())
+    }
+
+    fn parse_png_header(&mut self) -> Result<(), String> {
+        let header = [137, 80, 78, 71, 13, 10, 26, 10];
+
+        for byte in header.iter() {
+            let b = self.parse_byte()?;
+            if b != *byte as u8 {
+                return Err("Not a PNG file".to_string());
+            }
         }
-        ChunkType::PLTE => {
-            parse_plte(data, length)
+
+        Ok(())
+    }
+
+    fn get_chunk_type(&mut self) -> Result<(ChunkType, u32), String> {
+        if self.compressed_data.len() < 8 {
+            return Err("Not enough data to determine chunk header".to_string());
         }
-        ChunkType::IEND => {
-            parse_iend(data, length)
+
+        let length = self.parse_uint()?;
+        let chunk_type = self.parse_uint()?;
+
+        let headers: [(u32, ChunkType); 5] = [
+            (to_u32([73, 72, 68, 82]), ChunkType::IHDR),
+            (to_u32([80, 76, 84, 69]), ChunkType::PLTE),
+            (to_u32([73, 68, 65, 84]), ChunkType::IDAT),
+            (to_u32([73, 69, 78, 68]), ChunkType::IEND),
+            (to_u32([116, 69, 88, 116]), ChunkType::TEXT),
+        ];
+
+        for header in &headers {
+            if chunk_type == header.0 {
+                return Ok((header.1.clone(), length));
+            }
+        }
+
+        println!(
+            "{} {} {} {}",
+            chunk_type >> 24 & 0xff,
+            chunk_type >> 16 & 0xff,
+            chunk_type >> 8 & 0xff,
+            chunk_type & 0xff,
+        );
+        return Err("Unknown chunk header".to_string());
+    }
+
+    fn parse_uint(&mut self) -> Result<u32, String> {
+        let mut result: u32 = 0;
+        if self.compressed_data.len() < 4 {
+            return Err("Not enough data".to_string());
+        }
+        for i in 0..4 {
+            let byte = self.compressed_data.pop_front().unwrap() as u32;
+            result |= byte << 8 * (3 - i);
+        }
+
+        Ok(result)
+    }
+
+    fn parse_byte(&mut self) -> Result<u8, String> {
+        if self.compressed_data.len() < 1 {
+            return Err("Not enough data".to_string());
+        }
+
+        Ok(self.compressed_data.pop_front().unwrap())
+    }
+
+    fn parse_ihdr(&mut self, _: u32) -> Result<(), String> {
+        self.width = self.parse_uint()?;
+        self.height = self.parse_uint()?;
+        self.depth = self.parse_byte()?;
+        self.colour_type = self.parse_byte()?;
+        self.compression = self.parse_byte()?;
+        self.filter = self.parse_byte()?;
+        self.interlace = self.parse_byte()?;
+
+        let crc = self.parse_uint()?;
+        Ok(())
+    }
+
+    fn parse_idat(&mut self, length: u32) -> Result<(), String> {
+        for _ in 0..length {
+            let c = self.parse_byte()?;
+            self.decoded_data.push(c);
+        }
+
+        let crc = self.parse_uint()?;
+        Ok(())
+    }
+
+    fn parse_plte(&mut self, length: u32) -> Result<(), String> {
+        println!("PLTE");
+        Err("not implemented".to_string())
+    }
+
+    fn parse_iend(&mut self, length: u32) -> Result<(), String> {
+        println!("IEND");
+
+        let crc = self.parse_uint()?;
+        Ok(())
+    }
+
+    fn parse_text(&mut self, length: u32) -> Result<(), String> {
+        let mut size = 0;
+        let mut keyword = Vec::new();
+        loop {
+            let c = self.parse_byte()? as char;
+            size += 1;
+            if c == '\0' {
+                break;
+            }
+            keyword.push(c);
+        }
+        let bytes_left = length as i32 - size;
+        if bytes_left < 0 {
+            return Err("Expected a length > 0 for text string".to_string());
+        }
+        let mut text_str = Vec::new();
+        for _ in 0..bytes_left {
+            let c = self.parse_byte()? as char;
+            text_str.push(c);
+        }
+
+        let keyword: String = keyword.into_iter().collect();
+        let text_str: String = text_str.into_iter().collect();
+        println!("{}: {}", keyword, text_str);
+        let crc = self.parse_uint()?;
+        println!("crc: {}", crc);
+
+        Ok(())
+    }
+
+    fn parse_chunk(&mut self) -> Result<(), String> {
+        let chunk_type = self.get_chunk_type();
+        if chunk_type.is_err() {
+            return Err("Failed to read a valid PNG chunk header".to_string());
+        }
+
+        let (chunk_type, length) = chunk_type.unwrap();
+        match chunk_type {
+            ChunkType::IHDR => self.parse_ihdr(length),
+            ChunkType::IDAT => self.parse_idat(length),
+            ChunkType::PLTE => self.parse_plte(length),
+            ChunkType::IEND => self.parse_iend(length),
+            ChunkType::TEXT => self.parse_text(length),
         }
     }
 }
@@ -152,25 +227,18 @@ fn main() {
 
     let f = match f {
         Ok(f) => f,
-        Err(e) => panic!(e)
+        Err(e) => panic!(e),
     };
 
-    let mut data: VecDeque<u8> = f.into_iter().collect();
+    let data: Vec<u8> = f.into_iter().collect();
+    let mut parser = Parser::new();
 
-    if let Err(e) = parse_png_header(&mut data) {
-        println!("{}", e);
-    }
-
-    println!("PNG file!");
-
-    while data.len() > 0 {
-        match parse_chunk(&mut data) {
-            Ok(_) => { println!("Parsed chunk"); }
-            Err(e) => {
-                println!("Error while parsing PNG: {}", e);
-                panic!();
-            }
+    match parser.parse(data) {
+        Ok(_) => {
+            println!("File parsed!");
         }
-        println!("Remaining: {}", data.len());
+        Err(e) => {
+            println!("Failed to parse PNG: {}", e);
+        }
     }
 }
