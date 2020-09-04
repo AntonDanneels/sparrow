@@ -1,4 +1,5 @@
 use std::collections::VecDeque;
+mod zlib;
 
 #[derive(Clone)]
 enum ChunkType {
@@ -33,9 +34,9 @@ struct Parser {
     compressed_data: VecDeque<u8>,
 
     has_end: bool,
+    encoded_data: VecDeque<u8>,
 
     decoded_data: Vec<u8>,
-    encoded_data: Vec<u8>,
 }
 
 impl Parser {
@@ -50,7 +51,7 @@ impl Parser {
             interlace: 0,
             compressed_data: VecDeque::new(),
             has_end: false,
-            encoded_data: Vec::new(),
+            encoded_data: VecDeque::new(),
             decoded_data: Vec::new(),
         }
     }
@@ -73,6 +74,8 @@ impl Parser {
             println!("Remaining: {}", self.compressed_data.len());
             println!("================================");
         }
+
+        zlib::parse(&mut self.encoded_data)?;
 
         Ok(())
     }
@@ -159,7 +162,7 @@ impl Parser {
     fn parse_idat(&mut self, length: u32) -> Result<(), String> {
         for _ in 0..length {
             let c = self.parse_byte()?;
-            self.decoded_data.push(c);
+            self.encoded_data.push_back(c);
         }
 
         let crc = self.parse_uint()?;
