@@ -32,6 +32,8 @@ struct Parser {
     interlace: u8,
     compressed_data: VecDeque<u8>,
 
+    has_end: bool,
+
     decoded_data: Vec<u8>,
     encoded_data: Vec<u8>,
 }
@@ -47,6 +49,7 @@ impl Parser {
             filter: 0,
             interlace: 0,
             compressed_data: VecDeque::new(),
+            has_end: false,
             encoded_data: Vec::new(),
             decoded_data: Vec::new(),
         }
@@ -56,7 +59,7 @@ impl Parser {
         self.compressed_data = data.into_iter().collect();
 
         self.parse_png_header()?;
-        while self.compressed_data.len() > 0 {
+        while !self.has_end {
             println!("================================");
             match self.parse_chunk() {
                 Ok(_) => {
@@ -169,8 +172,7 @@ impl Parser {
     }
 
     fn parse_iend(&mut self, length: u32) -> Result<(), String> {
-        println!("IEND");
-
+        self.has_end = true;
         let crc = self.parse_uint()?;
         Ok(())
     }
