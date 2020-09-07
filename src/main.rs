@@ -33,12 +33,16 @@ struct Parser {
     compression: u8,
     filter: u8,
     interlace: u8,
+    // File data: PNG chunks
     compressed_data: VecDeque<u8>,
 
     has_end: bool,
+    // encoded zlib data
     encoded_data: VecDeque<u8>,
-
+    // decoded zlib data
     decoded_data: Vec<u8>,
+    // reconstructed image
+    data: Vec<u8>,
 }
 
 impl Parser {
@@ -55,6 +59,7 @@ impl Parser {
             has_end: false,
             encoded_data: VecDeque::new(),
             decoded_data: Vec::new(),
+            data: Vec::new(),
         }
     }
 
