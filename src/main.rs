@@ -10,6 +10,8 @@ enum ChunkType {
     IEND,
     /* Optional */
     TEXT,
+    PHYS,
+    ZTXT,
 }
 
 const fn to_u32(a: [u8; 4]) -> u32 {
@@ -101,12 +103,14 @@ impl Parser {
         let length = self.parse_uint()?;
         let chunk_type = self.parse_uint()?;
 
-        let headers: [(u32, ChunkType); 5] = [
+        let headers: [(u32, ChunkType); 7] = [
             (to_u32([73, 72, 68, 82]), ChunkType::IHDR),
             (to_u32([80, 76, 84, 69]), ChunkType::PLTE),
             (to_u32([73, 68, 65, 84]), ChunkType::IDAT),
             (to_u32([73, 69, 78, 68]), ChunkType::IEND),
             (to_u32([116, 69, 88, 116]), ChunkType::TEXT),
+            (to_u32([112, 72, 89, 115]), ChunkType::PHYS),
+            (to_u32([122, 84, 88, 116]), ChunkType::ZTXT),
         ];
 
         for header in &headers {
@@ -174,6 +178,40 @@ impl Parser {
         Err("not implemented".to_string())
     }
 
+    fn parse_ztxt(&mut self, length: u32) -> Result<(), String> {
+        let mut size = 0;
+        let mut keyword = Vec::new();
+        loop {
+            let c = self.parse_byte()? as char;
+            size += 1;
+            if c == '\0' {
+                break;
+            }
+            keyword.push(c);
+            if size > 79 {
+                return Err("Corrupted PNG zTXt header".to_string());
+            }
+        }
+        let method = self.parse_byte()?;
+        for _ in 0..(length - size - 1) {
+            self.parse_byte()?;
+        }
+
+        let crc = self.parse_uint()?;
+        Ok(())
+    }
+
+    fn parse_phys(&mut self, length: u32) -> Result<(), String> {
+        let ppu_x = self.parse_uint()?;
+        let ppu_y = self.parse_uint()?;
+        let unit = self.parse_byte()?;
+
+        println!("PPU: {}x{} ({})", ppu_x, ppu_y, unit);
+
+        let crc = self.parse_uint()?;
+        Ok(())
+    }
+
     fn parse_iend(&mut self, length: u32) -> Result<(), String> {
         self.has_end = true;
         let crc = self.parse_uint()?;
@@ -223,6 +261,8 @@ impl Parser {
             ChunkType::PLTE => self.parse_plte(length),
             ChunkType::IEND => self.parse_iend(length),
             ChunkType::TEXT => self.parse_text(length),
+            ChunkType::PHYS => self.parse_phys(length),
+            ChunkType::ZTXT => self.parse_ztxt(length),
         }
     }
 }
