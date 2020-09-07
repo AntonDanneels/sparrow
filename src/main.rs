@@ -82,7 +82,44 @@ impl Parser {
             println!("================================");
         }
 
-        zlib::parse(&mut self.encoded_data)?;
+        println!("Image info: {}x{}@{}", self.width, self.height, self.depth);
+        println!("colour_type: {}", self.colour_type);
+        println!("compression: {}", self.compression);
+        println!("filter: {}", self.filter);
+        println!("interlace: {}", self.interlace);
+        self.decoded_data = zlib::parse(&mut self.encoded_data)?;
+
+        //TODO: handle components properly
+        let filter = self.decoded_data[0];
+        match filter {
+            1 => {
+                self.data.push(self.decoded_data[1]);
+                self.data.push(self.decoded_data[2]);
+                self.data.push(self.decoded_data[3]);
+            }
+            _ => panic!(),
+        }
+        let mut idx = 4;
+        for x in 1..(self.width) {
+            match filter {
+                1 => {
+                    self.data.push(
+                        ((self.data[idx - 4] as u32 + self.decoded_data[idx] as u32) % 255) as u8,
+                    );
+                    self.data.push(
+                        ((self.data[idx - 3] as u32 + self.decoded_data[idx + 1] as u32) % 255)
+                            as u8,
+                    );
+                    self.data.push(
+                        ((self.data[idx - 2] as u32 + self.decoded_data[idx + 2] as u32) % 255)
+                            as u8,
+                    );
+                    idx += 3;
+                }
+                _ => {}
+            }
+        }
+        println!("{:?}", self.data);
 
         Ok(())
     }
@@ -273,7 +310,7 @@ impl Parser {
 }
 
 fn main() {
-    let f = std::fs::read("res/sparrow.png");
+    let f = std::fs::read("res/sparrow_bg.png");
 
     let f = match f {
         Ok(f) => f,
