@@ -51,11 +51,6 @@ impl<'a> BitBuffer<'a> {
 
         return result as u16;
     }
-
-    fn get_n_bits_rev(&mut self, n: u32) -> u16 {
-        let result = self.get_n_bits(n);
-        return result.reverse_bits() >> (16 - n);
-    }
 }
 
 pub fn parse(data: &mut VecDeque<u8>) -> Result<Vec<u8>, String> {
@@ -165,14 +160,20 @@ fn decode_huffman(
 ) -> Result<(u32, u32, u32), String> {
     let mut c = 0;
     let mut current_bits: u32 = 0;
+    let mut prev_length = 0;
+    let mut length_mask = 0;
     for pair in hf_codes.iter() {
         let length = pair.0 as u32;
         if current_bits != length {
             let bits_needed = length - current_bits;
             current_bits += bits_needed;
-            c = buffer.get_n_bits_rev(bits_needed) | (c << (bits_needed));
+            c |= buffer.get_n_bits(bits_needed) << (current_bits - bits_needed);
         }
-        if c as u32 == pair.1 {
+        if prev_length != length {
+            prev_length = length;
+            length_mask = (1 << pair.0) - 1;
+        }
+        if c as u32 & length_mask == pair.1 {
             return Ok(*pair);
         }
     }
@@ -220,7 +221,7 @@ fn fill_with_huffman(
     Ok(lengths)
 }
 
-pub fn build_huffman_codes(bit_lengths: &Vec<u32>) -> Vec<(u32, u32, u32)> {
+pub fn build_huffman_codes(bit_lengths: &Vec<u32>, reverse_bits: bool) -> Vec<(u32, u32, u32)> {
     let mut counts = vec![0; bit_lengths.len()];
     let mut next_code = vec![0; bit_lengths.len()];
     let mut codes = vec![0; bit_lengths.len()];
@@ -250,7 +251,15 @@ pub fn build_huffman_codes(bit_lengths: &Vec<u32>) -> Vec<(u32, u32, u32)> {
     let mut result = Vec::with_capacity(bit_lengths.len());
     for i in 0..codes.len() {
         if bit_lengths[i] > 0 {
-            result.push((bit_lengths[i], codes[i] as u32, i as u32));
+            let mut code;
+            if reverse_bits {
+                code = codes[i] as u16;
+                code = code.reverse_bits() >> (16 - bit_lengths[i]);
+            //println!("Before: {:#0b}, after: {:#0b} ({})", codes[i], code, bit_lengths[i]);
+            } else {
+                code = codes[i] as u16;
+            };
+            result.push((bit_lengths[i], code as u32, i as u32));
         }
     }
     result.sort_unstable_by(|a, b| a.0.cmp(&b.0));
@@ -262,7 +271,7 @@ pub fn build_huffman_codes(bit_lengths: &Vec<u32>) -> Vec<(u32, u32, u32)> {
 fn test_huffman() {
     /* Note, values defined by the DEFLATE spec */
     let bit_lengths = vec![3, 3, 3, 3, 3, 2, 4, 4];
-    let mut hf_codes = build_huffman_codes(&bit_lengths);
+    let mut hf_codes = build_huffman_codes(&bit_lengths, false);
     let target = vec![2, 3, 4, 5, 6, 0, 14, 15];
 
     hf_codes.sort_unstable_by(|a, b| a.2.cmp(&b.2));
