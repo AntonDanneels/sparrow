@@ -6,6 +6,28 @@ struct BitBuffer<'a> {
     data: &'a mut VecDeque<u8>,
 }
 
+/* As defined by the DEFLATE spec */
+static LENGTH_EXTRA_BITS: [u32; 29] = [
+    0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0,
+];
+static LENGTHS_BASE: [u16; 29] = [
+    3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99, 115, 131,
+    163, 195, 227, 258,
+];
+
+static DIST_EXTRA_BITS: [u32; 30] = [
+    0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13,
+    13,
+];
+static DIST_BASE: [u16; 30] = [
+    1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257, 385, 513, 769, 1025, 1537,
+    2049, 3073, 4097, 6145, 8193, 12289, 16385, 24577,
+];
+
+static CODE_LENGTH_INDICES: [usize; 19] = [
+    16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15,
+];
+
 impl<'a> BitBuffer<'a> {
     fn new(data: &mut VecDeque<u8>) -> BitBuffer {
         BitBuffer {
@@ -86,41 +108,19 @@ pub fn parse(data: &mut VecDeque<u8>) -> Result<Vec<u8>, String> {
             let h_dist = buffer.get_n_bits(5);
             let h_clen = buffer.get_n_bits(4);
 
-            let cl_indices = [
-                16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15,
-            ];
-            let mut code_lengths = vec![0; cl_indices.len()];
+            let mut code_lengths = vec![0; CODE_LENGTH_INDICES.len()];
 
             for i in 0..(4 + h_clen) {
                 let cl = buffer.get_n_bits(3);
-                code_lengths[cl_indices[i as usize]] = cl as u32;
+                code_lengths[CODE_LENGTH_INDICES[i as usize]] = cl as u32;
             }
-            let hf_codes = build_huffman_codes(&code_lengths);
+            let hf_codes = build_huffman_codes(&code_lengths, true);
 
             let lits = fill_with_huffman(257 + h_lit as usize, &hf_codes, &mut buffer)?;
             let dists = fill_with_huffman(1 + h_dist as usize, &hf_codes, &mut buffer)?;
 
-            let hf_lit = build_huffman_codes(&lits);
-            let hf_dist = build_huffman_codes(&dists);
-
-            /* As defined by the DEFLATE spec */
-            let length_extra_bits = vec![
-                0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5,
-                0,
-            ];
-            let lengths_base = vec![
-                3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83,
-                99, 115, 131, 163, 195, 227, 258,
-            ];
-
-            let dist_extra_bits = vec![
-                0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11,
-                12, 12, 13, 13,
-            ];
-            let dist_base = vec![
-                1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257, 385, 513, 769,
-                1025, 1537, 2049, 3073, 4097, 6145, 8193, 12289, 16385, 24577,
-            ];
+            let hf_lit = build_huffman_codes(&lits, true);
+            let hf_dist = build_huffman_codes(&dists, true);
 
             loop {
                 let val = decode_huffman(&hf_lit, &mut buffer)?.2;
@@ -131,8 +131,8 @@ pub fn parse(data: &mut VecDeque<u8>) -> Result<Vec<u8>, String> {
                     256 => break,
                     257..=285 => {
                         let idx = (val - 257) as usize;
-                        let extra = length_extra_bits[idx];
-                        let len = lengths_base[idx] + buffer.get_n_bits(extra);
+                        let extra = LENGTH_EXTRA_BITS[idx];
+                        let len = LENGTHS_BASE[idx] + buffer.get_n_bits(extra);
 
                         let dist_val = decode_huffman(&hf_dist, &mut buffer)?.2;
                         if dist_val > 29 {
@@ -140,11 +140,11 @@ pub fn parse(data: &mut VecDeque<u8>) -> Result<Vec<u8>, String> {
                         }
 
                         let idx = dist_val as usize;
-                        let extra = dist_extra_bits[idx];
-                        let dist = dist_base[idx] + buffer.get_n_bits(extra);
+                        let extra = DIST_EXTRA_BITS[idx];
+                        let dist = DIST_BASE[idx] + buffer.get_n_bits(extra);
 
-                        for i in 0..len {
-                            let v = output[(output.len() - dist as usize - i as usize)];
+                        let v = output[(output.len() - dist as usize)];
+                        for _ in 0..len {
                             output.push(v);
                         }
                     }
