@@ -85,7 +85,7 @@ pub fn parse(data: &mut VecDeque<u8>) -> Result<Vec<u8>, String> {
         return Err("Not a DEFLATE stream".to_string());
     }
 
-    let mut output = Vec::new(); //TODO
+    let mut output = Vec::with_capacity(buffer.data.len());
     let mut is_final = false;
     while !is_final {
         let b_final = buffer.get_n_bits(1);
