@@ -118,7 +118,11 @@ pub fn parse(data: &mut VecDeque<u8>) -> Result<Vec<u8>, String> {
             let hf_dist = build_huffman_codes(&dists, true);
 
             loop {
-                let val = decode_huffman(&hf_lit, &mut buffer)?.2;
+                let val = hf_lit.find(&mut buffer);
+                if val.is_none() {
+                    return Err("Failed to find a code".to_string());
+                }
+                let val = val.unwrap();
                 match val {
                     0..=255 => {
                         output.push(val as u8);
@@ -129,7 +133,11 @@ pub fn parse(data: &mut VecDeque<u8>) -> Result<Vec<u8>, String> {
                         let extra = LENGTH_EXTRA_BITS[idx];
                         let len = LENGTHS_BASE[idx] + buffer.get_n_bits(extra);
 
-                        let dist_val = decode_huffman(&hf_dist, &mut buffer)?.2;
+                        let dist_val = hf_dist.find(&mut buffer);
+                        if dist_val.is_none() {
+                            return Err("Failed to find a code".to_string());
+                        }
+                        let dist_val = dist_val.unwrap();
                         if dist_val > 29 {
                             return Err("Corrupted datastream".to_string());
                         }
@@ -183,12 +191,16 @@ fn decode_huffman(
 
 fn fill_with_huffman(
     num_needed: usize,
-    hf_codes: &Vec<(u32, u32, u32)>,
+    hf_codes: &HuffmanTree,
     buffer: &mut BitBuffer,
 ) -> Result<Vec<u32>, String> {
     let mut lengths = Vec::with_capacity(num_needed);
     while lengths.len() < num_needed {
-        let len = decode_huffman(hf_codes, buffer)?.2;
+        let len = hf_codes.find(buffer);
+        if len.is_none() {
+            return Err("Failed to find a code".to_string());
+        }
+        let len = len.unwrap();
         match len {
             0..=15 => {
                 lengths.push(len);
@@ -221,7 +233,7 @@ fn fill_with_huffman(
     Ok(lengths)
 }
 
-pub fn build_huffman_codes(bit_lengths: &Vec<u32>, reverse_bits: bool) -> Vec<(u32, u32, u32)> {
+fn build_huffman_codes(bit_lengths: &Vec<u32>, reverse_bits: bool) -> HuffmanTree {
     let mut counts = vec![0; bit_lengths.len()];
     let mut next_code = vec![0; bit_lengths.len()];
     let mut codes = vec![0; bit_lengths.len()];
@@ -248,23 +260,132 @@ pub fn build_huffman_codes(bit_lengths: &Vec<u32>, reverse_bits: bool) -> Vec<(u
         }
     }
 
-    let mut result = Vec::with_capacity(bit_lengths.len());
+    let mut result = HuffmanTree::new();
     for i in 0..codes.len() {
         if bit_lengths[i] > 0 {
             let mut code;
             if reverse_bits {
                 code = codes[i] as u16;
                 code = code.reverse_bits() >> (16 - bit_lengths[i]);
-            //println!("Before: {:#0b}, after: {:#0b} ({})", codes[i], code, bit_lengths[i]);
             } else {
                 code = codes[i] as u16;
             };
-            result.push((bit_lengths[i], code as u32, i as u32));
+            if !result.insert(code, bit_lengths[i] as u16, i as u32) {
+                panic!();
+            }
         }
     }
-    result.sort_unstable_by(|a, b| a.0.cmp(&b.0));
 
     result
+}
+
+#[derive(Debug)]
+struct HuffmanTree {
+    nodes: Vec<HuffmanNode>,
+}
+
+#[derive(Debug)]
+struct HuffmanNode {
+    left: Option<usize>,
+    right: Option<usize>,
+    val: Option<u32>,
+}
+
+impl HuffmanNode {
+    fn new() -> HuffmanNode {
+        HuffmanNode {
+            left: None,
+            right: None,
+            val: None,
+        }
+    }
+}
+
+impl HuffmanTree {
+    fn new() -> HuffmanTree {
+        let mut nodes = Vec::new();
+        nodes.push(HuffmanNode::new());
+        HuffmanTree { nodes: nodes }
+    }
+
+    fn new_node(&mut self) -> usize {
+        let result = self.nodes.len();
+        self.nodes.push(HuffmanNode::new());
+
+        result
+    }
+
+    fn find(&self, buffer: &mut BitBuffer) -> Option<u32> {
+        let mut current_node = 0;
+
+        loop {
+            let c = buffer.get_n_bits(1);
+
+            if c > 0 {
+                if self.nodes[current_node].right.is_some() {
+                    let idx = self.nodes[current_node].right.unwrap();
+                    if self.nodes[idx].val.is_some() {
+                        return self.nodes[idx].val;
+                    }
+                    current_node = idx;
+                } else {
+                    return None;
+                }
+            } else {
+                if self.nodes[current_node].left.is_some() {
+                    let idx = self.nodes[current_node].left.unwrap();
+                    if self.nodes[idx].val.is_some() {
+                        return self.nodes[idx].val;
+                    }
+                    current_node = idx;
+                } else {
+                    return None;
+                }
+            }
+        }
+    }
+
+    fn insert(&mut self, code: u16, bit_length: u16, val: u32) -> bool {
+        let mut c = code;
+        let mut current_node = 0;
+        for _ in 0..bit_length {
+            let bit = c & 0b1;
+            c >>= 1;
+
+            if bit > 0 {
+                if self.nodes[current_node].right.is_none() {
+                    self.nodes[current_node].right = Some(self.new_node());
+                }
+                current_node = self.nodes[current_node].right.unwrap();
+            } else {
+                if self.nodes[current_node].left.is_none() {
+                    self.nodes[current_node].left = Some(self.new_node());
+                }
+                current_node = self.nodes[current_node].left.unwrap();
+            }
+        }
+        if self.nodes[current_node].val.is_some() {
+            return false;
+        }
+        self.nodes[current_node].val = Some(val);
+
+        true
+    }
+}
+
+#[test]
+fn test_huffman_tree() {
+    let mut tree = HuffmanTree::new();
+    tree.insert(6, 8, 100);
+    tree.insert(5, 8, 3);
+    tree.insert(16, 8, 5);
+    println!("{:?}", tree.nodes);
+    let mut data = vec![6, 5, 16].into_iter().collect();
+    let mut buffer = BitBuffer::new(&mut data);
+
+    assert_eq!(tree.find(&mut buffer), Some(100));
+    assert_eq!(tree.find(&mut buffer), Some(3));
+    assert_eq!(tree.find(&mut buffer), Some(5));
 }
 
 #[test]
