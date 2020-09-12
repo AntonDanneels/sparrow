@@ -152,8 +152,8 @@ pub fn parse(data: &mut VecDeque<u8>) -> Result<Vec<u8>, String> {
                         let extra = DIST_EXTRA_BITS[idx];
                         let dist = DIST_BASE[idx] + buffer.get_n_bits(extra);
 
-                        let v = output[(output.len() - dist as usize)];
                         for _ in 0..len {
+                            let v = output[(output.len() - dist as usize)];
                             output.push(v);
                         }
                     }
