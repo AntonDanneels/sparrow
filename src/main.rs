@@ -13,6 +13,7 @@ enum ChunkType {
     TEXT,
     PHYS,
     ZTXT,
+    GAMA,
 }
 
 const fn to_u32(a: [u8; 4]) -> u32 {
@@ -248,7 +249,7 @@ impl Parser {
         let length = self.parse_uint()?;
         let chunk_type = self.parse_uint()?;
 
-        let headers: [(u32, ChunkType); 7] = [
+        let headers: [(u32, ChunkType); 8] = [
             (to_u32([73, 72, 68, 82]), ChunkType::IHDR),
             (to_u32([80, 76, 84, 69]), ChunkType::PLTE),
             (to_u32([73, 68, 65, 84]), ChunkType::IDAT),
@@ -256,6 +257,7 @@ impl Parser {
             (to_u32([116, 69, 88, 116]), ChunkType::TEXT),
             (to_u32([112, 72, 89, 115]), ChunkType::PHYS),
             (to_u32([122, 84, 88, 116]), ChunkType::ZTXT),
+            (to_u32([103, 65, 77, 65]), ChunkType::GAMA),
         ];
 
         for header in &headers {
@@ -361,6 +363,12 @@ impl Parser {
 
     fn parse_iend(&mut self, length: u32) -> Result<(), String> {
         self.has_end = true;
+        let crc = self.parse_uint()?;
+        Ok(())
+    }
+
+    fn parse_gama(&mut self, length: u32) -> Result<(), String> {
+        let gamma = self.parse_uint()?;
         let crc = self.parse_uint()?;
         Ok(())
     }
