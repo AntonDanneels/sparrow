@@ -1,11 +1,5 @@
 use std::collections::VecDeque;
 
-struct BitBuffer<'a> {
-    buffer: u32,
-    num_bits: u32,
-    data: &'a mut VecDeque<u8>,
-}
-
 /* As defined by the DEFLATE spec */
 static LENGTH_EXTRA_BITS: [u32; 29] = [
     0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0,
@@ -28,6 +22,12 @@ static CODE_LENGTH_INDICES: [usize; 19] = [
     16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15,
 ];
 
+struct BitBuffer<'a> {
+    buffer: u32,
+    num_bits: u32,
+    data: &'a mut VecDeque<u8>,
+}
+
 impl<'a> BitBuffer<'a> {
     fn new(data: &mut VecDeque<u8>) -> BitBuffer {
         BitBuffer {
@@ -36,15 +36,21 @@ impl<'a> BitBuffer<'a> {
             data: data,
         }
     }
-    fn get_n_bits(&mut self, n: u32) -> u16 {
-        while n > self.num_bits || self.num_bits < 24 {
+
+    fn fill(&mut self) {
+        while self.num_bits < 24 {
             if self.data.len() == 0 {
                 break;
             }
             self.buffer |= (self.data.pop_front().unwrap() as u32) << self.num_bits;
             self.num_bits += 8;
         }
+    }
 
+    fn get_n_bits(&mut self, n: u32) -> u16 {
+        if self.num_bits < 24 {
+            self.fill();
+        }
         let result = self.buffer & ((1 << n) - 1);
         self.buffer >>= n;
         self.num_bits -= n;
