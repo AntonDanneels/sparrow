@@ -297,13 +297,20 @@ impl HuffmanTree {
     fn find(&self, buffer: &mut BitBuffer) -> Option<u32> {
         let mut current_node = 0;
 
+        let mut i = 0;
+        if buffer.num_bits < 24 {
+            buffer.fill();
+        }
         loop {
-            let c = buffer.get_n_bits(1);
+            let c = (buffer.buffer >> i) & 0b1;
+            i += 1;
 
             if c > 0 {
                 if self.nodes[current_node].right.is_some() {
                     let idx = self.nodes[current_node].right.unwrap();
                     if self.nodes[idx].val.is_some() {
+                        buffer.buffer >>= i;
+                        buffer.num_bits -= i;
                         return self.nodes[idx].val;
                     }
                     current_node = idx;
@@ -314,6 +321,8 @@ impl HuffmanTree {
                 if self.nodes[current_node].left.is_some() {
                     let idx = self.nodes[current_node].left.unwrap();
                     if self.nodes[idx].val.is_some() {
+                        buffer.buffer >>= i;
+                        buffer.num_bits -= i;
                         return self.nodes[idx].val;
                     }
                     current_node = idx;
