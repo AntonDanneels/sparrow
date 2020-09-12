@@ -1,4 +1,5 @@
 use std::collections::VecDeque;
+use std::time::Instant;
 mod zlib;
 
 #[derive(Clone)]
@@ -66,60 +67,162 @@ impl Parser {
     fn parse(&mut self, data: Vec<u8>) -> Result<(), String> {
         self.compressed_data = data.into_iter().collect();
 
+        let now = Instant::now();
         self.parse_png_header()?;
         while !self.has_end {
-            println!("================================");
             match self.parse_chunk() {
-                Ok(_) => {
-                    println!("Parsed chunk");
-                }
+                Ok(_) => {}
                 Err(e) => {
                     println!("Error while parsing PNG: {}", e);
                     panic!();
                 }
             }
-            println!("Remaining: {}", self.compressed_data.len());
-            println!("================================");
         }
+        println!("PNG phase: {:?}", now.elapsed());
 
+        /*
         println!("Image info: {}x{}@{}", self.width, self.height, self.depth);
         println!("colour_type: {}", self.colour_type);
         println!("compression: {}", self.compression);
         println!("filter: {}", self.filter);
         println!("interlace: {}", self.interlace);
+        */
+        let now = Instant::now();
         self.decoded_data = zlib::parse(&mut self.encoded_data)?;
+        println!("zlib phase: {:?}", now.elapsed());
 
         //TODO: handle components properly
-        let filter = self.decoded_data[0];
-        match filter {
-            1 => {
-                self.data.push(self.decoded_data[1]);
-                self.data.push(self.decoded_data[2]);
-                self.data.push(self.decoded_data[3]);
+        let now = Instant::now();
+        let num_components = match self.colour_type {
+            2 => 3,
+            _ => 0,
+        };
+        let paeth_predictor = |a, b, c| -> u32 {
+            let a = a as i32;
+            let b = b as i32;
+            let c = c as i32;
+            let p = a + b - c;
+            let pa = (p - a).abs();
+            let pb = (p - b).abs();
+            let pc = (p - c).abs();
+            if pa <= pb && pa <= pc {
+                a as u32
+            } else if pb <= pc {
+                b as u32
+            } else {
+                c as u32
             }
-            _ => panic!(),
-        }
-        let mut idx = 4;
-        for x in 1..(self.width) {
-            match filter {
-                1 => {
-                    self.data.push(
-                        ((self.data[idx - 4] as u32 + self.decoded_data[idx] as u32) % 255) as u8,
-                    );
-                    self.data.push(
-                        ((self.data[idx - 3] as u32 + self.decoded_data[idx + 1] as u32) % 255)
-                            as u8,
-                    );
-                    self.data.push(
-                        ((self.data[idx - 2] as u32 + self.decoded_data[idx + 2] as u32) % 255)
-                            as u8,
-                    );
-                    idx += 3;
+        };
+        self.data = Vec::with_capacity((self.width * self.height * num_components) as usize);
+
+        let mut p = Vec::with_capacity(num_components as usize);
+        for y in 0..(self.height) {
+            let row_index = y * self.width * num_components + y;
+            let filter = self.decoded_data[(row_index) as usize];
+            for x in 1..(self.width + 1) {
+                let a = |offset| -> u32 {
+                    match x {
+                        1 => 0,
+                        _ => {
+                            self.data[(self.data.len() as u32 - num_components + offset) as usize]
+                                as u32
+                        }
+                    }
+                };
+                let b = |offset| -> u32 {
+                    match y {
+                        0 => 0,
+                        _ => {
+                            self.data[(self.data.len() as u32 - self.width * num_components
+                                + offset) as usize] as u32
+                        }
+                    }
+                };
+                let c = |offset| -> u32 {
+                    match (x, y) {
+                        (1, 0) => 0,
+                        (1, _) => 0,
+                        (_, 0) => 0,
+                        (_, _) => {
+                            self.data[(self.data.len() as u32
+                                - self.width * num_components
+                                - num_components
+                                + offset) as usize] as u32
+                        }
+                    }
+                };
+
+                let xx = row_index + (x - 1) * num_components + 1;
+                match filter {
+                    0 => {
+                        for i in 0..num_components {
+                            self.data.push(self.decoded_data[(xx + i) as usize]);
+                        }
+                    }
+                    1 => {
+                        for i in 0..num_components {
+                            p.push(
+                                ((self.decoded_data[(xx + i) as usize] as u32 + a(i)) % 256) as u8,
+                            );
+                        }
+                        self.data.append(&mut p);
+                    }
+                    2 => {
+                        for i in 0..num_components {
+                            p.push(
+                                ((self.decoded_data[(xx + i) as usize] as u32 + b(i)) % 256) as u8,
+                            );
+                        }
+                        self.data.append(&mut p);
+                    }
+                    3 => {
+                        for i in 0..num_components {
+                            p.push(
+                                ((self.decoded_data[(xx + i) as usize] as u32 + (a(i) + b(i)) / 2)
+                                    % 256) as u8,
+                            );
+                        }
+                        self.data.append(&mut p);
+                    }
+                    4 => {
+                        for i in 0..num_components {
+                            p.push(
+                                ((self.decoded_data[(xx + i) as usize] as u32
+                                    + paeth_predictor(a(i), b(i), c(i)))
+                                    % 256) as u8,
+                            );
+                        }
+                        self.data.append(&mut p);
+                    }
+                    _ => {
+                        return Err("Corrupted data".to_string());
+                    }
                 }
-                _ => {}
             }
         }
-        println!("{:?}", self.data);
+        println!("reverse filter phase: {:?}", now.elapsed());
+
+        use std::fs::File;
+        use std::io::prelude::*;
+        let mut file = File::create("img.ppm").unwrap();
+        file.write_all(b"P3 \n").unwrap();
+        file.write_all(format!("{} {} \n", self.width, self.height).as_bytes())
+            .unwrap();
+        file.write_all(b"255 \n").unwrap();
+        let mut i = 0;
+        while i < self.data.len() {
+            file.write_all(
+                format!(
+                    "{} {} {}\n",
+                    self.data[i],
+                    self.data[i + 1],
+                    self.data[i + 2]
+                )
+                .as_bytes(),
+            )
+            .unwrap();
+            i += 3;
+        }
 
         Ok(())
     }
@@ -206,10 +309,12 @@ impl Parser {
     }
 
     fn parse_idat(&mut self, length: u32) -> Result<(), String> {
-        for _ in 0..length {
-            let c = self.parse_byte()?;
-            self.encoded_data.push_back(c);
+        if self.compressed_data.len() < length as usize {
+            return Err("Not enough data".to_string());
         }
+        let new_data = self.compressed_data.split_off(length as usize);
+        self.encoded_data.append(&mut self.compressed_data);
+        self.compressed_data = new_data;
 
         let crc = self.parse_uint()?;
         Ok(())
@@ -248,7 +353,7 @@ impl Parser {
         let ppu_y = self.parse_uint()?;
         let unit = self.parse_byte()?;
 
-        println!("PPU: {}x{} ({})", ppu_x, ppu_y, unit);
+        //println!("PPU: {}x{} ({})", ppu_x, ppu_y, unit);
 
         let crc = self.parse_uint()?;
         Ok(())
@@ -283,9 +388,9 @@ impl Parser {
 
         let keyword: String = keyword.into_iter().collect();
         let text_str: String = text_str.into_iter().collect();
-        println!("{}: {}", keyword, text_str);
+        //println!("{}: {}", keyword, text_str);
         let crc = self.parse_uint()?;
-        println!("crc: {}", crc);
+        //println!("crc: {}", crc);
 
         Ok(())
     }
