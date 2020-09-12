@@ -168,33 +168,6 @@ pub fn parse(data: &mut VecDeque<u8>) -> Result<Vec<u8>, String> {
     Ok(output)
 }
 
-fn decode_huffman(
-    hf_codes: &Vec<(u32, u32, u32)>,
-    buffer: &mut BitBuffer,
-) -> Result<(u32, u32, u32), String> {
-    let mut c = 0;
-    let mut current_bits: u32 = 0;
-    let mut prev_length = 0;
-    let mut length_mask = 0;
-    for pair in hf_codes.iter() {
-        let length = pair.0 as u32;
-        if current_bits != length {
-            let bits_needed = length - current_bits;
-            current_bits += bits_needed;
-            c |= buffer.get_n_bits(bits_needed) << (current_bits - bits_needed);
-        }
-        if prev_length != length {
-            prev_length = length;
-            length_mask = (1 << pair.0) - 1;
-        }
-        if c as u32 & length_mask == pair.1 {
-            return Ok(*pair);
-        }
-    }
-
-    Err("No valid bit pattern found".to_string())
-}
-
 fn fill_with_huffman(
     num_needed: usize,
     hf_codes: &HuffmanTree,
