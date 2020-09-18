@@ -16,6 +16,7 @@ enum ChunkType {
     PHYS,
     ZTXT,
     GAMA,
+    SBIT,
 }
 
 const fn to_u32(a: [u8; 4]) -> u32 {
@@ -479,7 +480,7 @@ impl Parser {
         let length = self.parse_uint()?;
         let chunk_type = self.parse_uint()?;
 
-        let headers: [(u32, ChunkType); 8] = [
+        let headers: [(u32, ChunkType); 9] = [
             (to_u32([73, 72, 68, 82]), ChunkType::IHDR),
             (to_u32([80, 76, 84, 69]), ChunkType::PLTE),
             (to_u32([73, 68, 65, 84]), ChunkType::IDAT),
@@ -488,6 +489,7 @@ impl Parser {
             (to_u32([112, 72, 89, 115]), ChunkType::PHYS),
             (to_u32([122, 84, 88, 116]), ChunkType::ZTXT),
             (to_u32([103, 65, 77, 65]), ChunkType::GAMA),
+            (to_u32([115, 66, 73, 84]), ChunkType::SBIT),
         ];
 
         for header in &headers {
@@ -622,6 +624,33 @@ impl Parser {
         Ok(())
     }
 
+    fn parse_sbit(&mut self, _length: u32) -> Result<(), String> {
+        match self.colour_type {
+            ColourType::Grayscale => {
+                println!("g: {}", self.parse_byte()?);
+            }
+            ColourType::TrueColour | ColourType::Indexed => {
+                println!("r: {}", self.parse_byte()?);
+                println!("g: {}", self.parse_byte()?);
+                println!("b: {}", self.parse_byte()?);
+            }
+            ColourType::GrayscaleAlpha => {
+                println!("g: {}", self.parse_byte()?);
+                println!("a: {}", self.parse_byte()?);
+            }
+            ColourType::TrueColourAlpha => {
+                println!("r: {}", self.parse_byte()?);
+                println!("g: {}", self.parse_byte()?);
+                println!("b: {}", self.parse_byte()?);
+                println!("a: {}", self.parse_byte()?);
+            }
+            ColourType::Invalid => return Err("Got sBIT before colour type".to_string()),
+        }
+
+        let _crc = self.parse_uint()?;
+        Ok(())
+    }
+
     fn parse_text(&mut self, length: u32) -> Result<(), String> {
         let mut size = 0;
         let mut keyword = Vec::new();
@@ -668,6 +697,7 @@ impl Parser {
             ChunkType::PHYS => self.parse_phys(length),
             ChunkType::ZTXT => self.parse_ztxt(length),
             ChunkType::GAMA => self.parse_gama(length),
+            ChunkType::SBIT => self.parse_sbit(length),
         }
     }
 }
