@@ -47,6 +47,7 @@ struct Parser {
     compression: u8,
     filter: u8,
     interlace: u8,
+    plte: Vec<(u8, u8, u8)>,
     // File data: PNG chunks
     compressed_data: VecDeque<u8>,
 
@@ -69,6 +70,7 @@ impl Parser {
             compression: 0,
             filter: 0,
             interlace: 0,
+            plte: Vec::new(),
             compressed_data: VecDeque::new(),
             has_end: false,
             encoded_data: VecDeque::new(),
@@ -306,17 +308,38 @@ impl Parser {
                         match depth {
                             1 => {
                                 for i in 0..std::cmp::min(width, 8) {
-                                    data.push((x >> (7 - i) & 0b1) * 255);
+                                    let index = (x >> (7 - i) & 0b1) as usize;
+                                    if self.colour_type == ColourType::Indexed {
+                                        data.push(self.plte[index].0);
+                                        data.push(self.plte[index].1);
+                                        data.push(self.plte[index].2);
+                                    } else {
+                                        data.push((x >> (7 - i) & 0b1) * 255);
+                                    }
                                 }
                             }
                             2 => {
                                 for i in 0..(std::cmp::min(width, 8 / 2)) {
-                                    data.push((x >> (6 - (i * 2)) & 0b11) * 85);
+                                    let index = (x >> (6 - (i * 2)) & 0b11) as usize;
+                                    if self.colour_type == ColourType::Indexed {
+                                        data.push(self.plte[index].0);
+                                        data.push(self.plte[index].1);
+                                        data.push(self.plte[index].2);
+                                    } else {
+                                        data.push((x >> (6 - (i * 2)) & 0b11) * 85);
+                                    }
                                 }
                             }
                             4 => {
                                 for i in 0..(std::cmp::min(width, 8 / 4)) {
-                                    data.push((x >> (4 - (i * 4)) & 0b1111) * 17);
+                                    let index = (x >> (4 - (i * 4)) & 0b1111) as usize;
+                                    if self.colour_type == ColourType::Indexed {
+                                        data.push(self.plte[index].0);
+                                        data.push(self.plte[index].1);
+                                        data.push(self.plte[index].2);
+                                    } else {
+                                        data.push((x >> (4 - (i * 4)) & 0b1111) * 17);
+                                    }
                                 }
                             }
                             _ => panic!(),
@@ -537,8 +560,20 @@ impl Parser {
     }
 
     fn parse_plte(&mut self, length: u32) -> Result<(), String> {
-        println!("PLTE");
-        Err("not implemented".to_string())
+        if length % 3 != 0 {
+            return Err("Corrupted data".to_string());
+        }
+
+        self.plte = Vec::with_capacity((length / 3) as usize);
+        for _ in 0..(length / 3) {
+            let r = self.parse_byte()?;
+            let g = self.parse_byte()?;
+            let b = self.parse_byte()?;
+            self.plte.push((r, g, b));
+        }
+
+        let _crc = self.parse_uint()?;
+        Ok(())
     }
 
     fn parse_ztxt(&mut self, length: u32) -> Result<(), String> {
