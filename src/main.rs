@@ -28,12 +28,22 @@ const fn to_u32(a: [u8; 4]) -> u32 {
     result
 }
 
+#[derive(Debug, PartialEq)]
+enum ColourType {
+    Grayscale,
+    TrueColour,
+    Indexed,
+    GrayscaleAlpha,
+    TrueColourAlpha,
+    Invalid,
+}
+
 #[derive(Debug)]
 struct Parser {
     width: u32,
     height: u32,
     depth: u8,
-    colour_type: u8,
+    colour_type: ColourType,
     compression: u8,
     filter: u8,
     interlace: u8,
@@ -55,7 +65,7 @@ impl Parser {
             width: 0,
             height: 0,
             depth: 0,
-            colour_type: 0,
+            colour_type: ColourType::Invalid,
             compression: 0,
             filter: 0,
             interlace: 0,
@@ -84,7 +94,7 @@ impl Parser {
         println!("PNG phase: {:?}", now.elapsed());
 
         println!("Image info: {}x{}@{}", self.width, self.height, self.depth);
-        println!("colour_type: {}", self.colour_type);
+        println!("colour_type: {:?}", self.colour_type);
         println!("compression: {}", self.compression);
         println!("filter: {}", self.filter);
         println!("interlace: {}", self.interlace);
@@ -114,8 +124,15 @@ impl Parser {
         };
 
         let num_components: usize = match self.colour_type {
-            0 => 1, //Grayscale
-            2 => 3, //True color
+            ColourType::Grayscale => 1,
+            ColourType::TrueColour => 3,
+            ColourType::Indexed => {
+                if self.plte.len() == 0 {
+                    return Err("Missing PLTE chunk".to_string());
+                }
+
+                3
+            }
             _ => panic!(),
         };
         match self.interlace {
@@ -176,17 +193,21 @@ impl Parser {
                 let mut row = STARTING_ROW[pass];
                 let tmp_w = self.width as usize / COL_INCREMENT[pass];
                 let tmp_h = self.height as usize / ROW_INCREMENT[pass];
+                let bytes_needed = match self.colour_type {
+                    ColourType::Indexed => 1,
+                    _ => num_components,
+                };
                 let data = self.reverse_filter(
                     self.width as usize / COL_INCREMENT[pass],
                     self.height as usize / ROW_INCREMENT[pass],
-                    num_components,
+                    bytes_needed,
                     self.depth as usize,
                     offset,
                 )?;
                 offset += tmp_h
                     + ((tmp_w as f32 / 8.0 * self.depth as f32).ceil() as usize)
                         * tmp_h
-                        * num_components;
+                        * bytes_needed;
                 let mut index = 0;
                 while row < self.height as usize {
                     let mut col = STARTING_COL[pass];
@@ -498,7 +519,14 @@ impl Parser {
         self.width = self.parse_uint()?;
         self.height = self.parse_uint()?;
         self.depth = self.parse_byte()?;
-        self.colour_type = self.parse_byte()?;
+        self.colour_type = match self.parse_byte()? {
+            0 => ColourType::Grayscale,
+            2 => ColourType::TrueColour,
+            3 => ColourType::Indexed,
+            4 => ColourType::GrayscaleAlpha,
+            6 => ColourType::TrueColourAlpha,
+            _ => ColourType::Invalid,
+        };
         self.compression = self.parse_byte()?;
         self.filter = self.parse_byte()?;
         self.interlace = self.parse_byte()?;
