@@ -1,1 +1,4 @@
 /target
+tests/venv
+tests/*.ppm
+tests/__pycache__
