@@ -142,7 +142,6 @@ impl Parser {
         };
 
         let visit = |image: &mut Vec<u8>, data: &Vec<u8>, x, y, w, h| {
-            //println!("{}: {}, {}, {}, {}", data, x, y, w, h);
             for yy in 0..h {
                 for xx in 0..w {
                     for i in 0..num_components {
@@ -150,7 +149,6 @@ impl Parser {
                             + i
                             + (y + yy) * (self.width * num_components as u32) as usize] = data[i];
                     }
-                    //println!("Set: {} to {}", x + xx + (y + yy) * self.width as usize, 255);
                 }
             }
         };
@@ -182,6 +180,7 @@ impl Parser {
                 }
             }
         };
+        let now = Instant::now();
         if self.interlace == 1 {
             let mut offset = 0;
             let mut img = vec![122; (self.width * self.height * num_components as u32) as usize];
@@ -239,12 +238,6 @@ impl Parser {
             return Ok(());
         }
 
-        for i in 1..5 {
-            println!("{:#0b}", self.decoded_data[i]);
-        }
-
-        //TODO: handle components properly
-        let now = Instant::now();
         self.data = self.reverse_filter(
             self.width as usize,
             self.height as usize,
@@ -330,10 +323,6 @@ impl Parser {
                         }
                     }
                 }
-                //for i in 0..(height /*filters*/ + width * height * channels / 8) {
-                //    data.push(self.decoded_data[i]);
-                //}
-                //panic!();
                 return Ok(data);
             }
             8 => {}
