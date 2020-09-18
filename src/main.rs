@@ -503,7 +503,7 @@ impl Parser {
         self.filter = self.parse_byte()?;
         self.interlace = self.parse_byte()?;
 
-        let crc = self.parse_uint()?;
+        let _crc = self.parse_uint()?;
         Ok(())
     }
 
@@ -515,7 +515,7 @@ impl Parser {
         self.encoded_data.append(&mut self.compressed_data);
         self.compressed_data = new_data;
 
-        let crc = self.parse_uint()?;
+        let _crc = self.parse_uint()?;
         Ok(())
     }
 
@@ -538,12 +538,12 @@ impl Parser {
                 return Err("Corrupted PNG zTXt header".to_string());
             }
         }
-        let method = self.parse_byte()?;
+        let _method = self.parse_byte()?;
         for _ in 0..(length - size - 1) {
             self.parse_byte()?;
         }
 
-        let crc = self.parse_uint()?;
+        let _crc = self.parse_uint()?;
         Ok(())
     }
 
@@ -554,19 +554,19 @@ impl Parser {
 
         //println!("PPU: {}x{} ({})", ppu_x, ppu_y, unit);
 
-        let crc = self.parse_uint()?;
+        let _crc = self.parse_uint()?;
         Ok(())
     }
 
     fn parse_iend(&mut self, length: u32) -> Result<(), String> {
         self.has_end = true;
-        let crc = self.parse_uint()?;
+        let _crc = self.parse_uint()?;
         Ok(())
     }
 
     fn parse_gama(&mut self, length: u32) -> Result<(), String> {
         let gamma = self.parse_uint()?;
-        let crc = self.parse_uint()?;
+        let _crc = self.parse_uint()?;
         Ok(())
     }
 
@@ -615,6 +615,7 @@ impl Parser {
             ChunkType::TEXT => self.parse_text(length),
             ChunkType::PHYS => self.parse_phys(length),
             ChunkType::ZTXT => self.parse_ztxt(length),
+            ChunkType::GAMA => self.parse_gama(length),
         }
     }
 }
