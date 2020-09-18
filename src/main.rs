@@ -1,4 +1,6 @@
 use std::collections::VecDeque;
+use std::fs::File;
+use std::io::prelude::*;
 use std::time::Instant;
 mod zlib;
 
@@ -81,130 +83,156 @@ impl Parser {
         }
         println!("PNG phase: {:?}", now.elapsed());
 
-        /*
         println!("Image info: {}x{}@{}", self.width, self.height, self.depth);
         println!("colour_type: {}", self.colour_type);
         println!("compression: {}", self.compression);
         println!("filter: {}", self.filter);
         println!("interlace: {}", self.interlace);
-        */
         let now = Instant::now();
         self.decoded_data = zlib::parse(&mut self.encoded_data)?;
         println!("zlib phase: {:?}", now.elapsed());
+        println!(
+            "Decoded data: {:?}, len: {}",
+            self.decoded_data,
+            self.decoded_data.len()
+        );
+
+        //let mut tmp_data = Vec::with_capacity((self.width * self.height) as usize);
+        const STARTING_ROW: [usize; 7] = [0, 0, 4, 0, 2, 0, 1];
+        const STARTING_COL: [usize; 7] = [0, 4, 0, 2, 0, 1, 0];
+        const ROW_INCREMENT: [usize; 7] = [8, 8, 8, 4, 4, 2, 2];
+        const COL_INCREMENT: [usize; 7] = [8, 8, 4, 4, 2, 2, 1];
+        const BLOCK_HEIGHT: [usize; 7] = [8, 8, 4, 4, 2, 2, 1];
+        const BLOCK_WIDTH: [usize; 7] = [8, 4, 4, 2, 2, 1, 1];
+
+        let min = |a, b| -> usize {
+            if a < b {
+                a
+            } else {
+                b
+            }
+        };
+
+        let num_components: usize = match self.colour_type {
+            0 => 1, //Grayscale
+            2 => 3, //True color
+            _ => panic!(),
+        };
+        match self.interlace {
+            0 => false,
+            1 => true,
+            _ => return Err("Invalid interlace method".to_string()),
+        };
+
+        let visit = |image: &mut Vec<u8>, data: &Vec<u8>, x, y, w, h| {
+            //println!("{}: {}, {}, {}, {}", data, x, y, w, h);
+            for yy in 0..h {
+                for xx in 0..w {
+                    for i in 0..num_components {
+                        image[(x + xx) * num_components
+                            + i
+                            + (y + yy) * (self.width * num_components as u32) as usize] = data[i];
+                    }
+                    //println!("Set: {} to {}", x + xx + (y + yy) * self.width as usize, 255);
+                }
+            }
+        };
+
+        let write_img = |name: String, w: usize, h: usize, data: &Vec<u8>| {
+            let mut file = File::create(name).unwrap();
+            file.write_all(b"P3 \n").unwrap();
+            file.write_all(format!("{} {} \n", w, h).as_bytes())
+                .unwrap();
+            file.write_all(b"255 \n").unwrap();
+            let mut i = 0;
+            while i < data.len() {
+                match num_components {
+                    1 => {
+                        file.write_all(
+                            format!("{} {} {} \n", data[i], data[i], data[i],).as_bytes(),
+                        )
+                        .unwrap();
+                        i += 1;
+                    }
+                    3 => {
+                        file.write_all(
+                            format!("{} {} {} \n", data[i], data[i + 1], data[i + 2],).as_bytes(),
+                        )
+                        .unwrap();
+                        i += 3;
+                    }
+                    _ => panic!(),
+                }
+            }
+        };
+        if self.interlace == 1 {
+            let mut offset = 0;
+            let mut img = vec![122; (self.width * self.height * num_components as u32) as usize];
+            for pass in 0..7 {
+                println!(
+                    "----------------------PASS: {}---------------------------",
+                    pass
+                );
+                let mut row = STARTING_ROW[pass];
+                let tmp_w = self.width as usize / COL_INCREMENT[pass];
+                let tmp_h = self.height as usize / ROW_INCREMENT[pass];
+                let data = self.reverse_filter(
+                    self.width as usize / COL_INCREMENT[pass],
+                    self.height as usize / ROW_INCREMENT[pass],
+                    num_components,
+                    self.depth as usize,
+                    offset,
+                )?;
+                offset += tmp_h
+                    + ((tmp_w as f32 / 8.0 * self.depth as f32).ceil() as usize)
+                        * tmp_h
+                        * num_components;
+                let mut index = 0;
+                while row < self.height as usize {
+                    let mut col = STARTING_COL[pass];
+                    while col < self.width as usize {
+                        let mut d = vec![];
+                        for i in 0..num_components {
+                            d.push(data[index + i]);
+                        }
+                        visit(
+                            &mut img,
+                            &d,
+                            col,
+                            row,
+                            min(BLOCK_WIDTH[pass], self.width as usize - col),
+                            min(BLOCK_HEIGHT[pass], self.height as usize - row),
+                        );
+                        col += COL_INCREMENT[pass];
+                        index += num_components;
+                    }
+                    row += ROW_INCREMENT[pass];
+                }
+                write_img(
+                    format!("pass_{}.ppm", pass),
+                    self.width as usize,
+                    self.height as usize,
+                    &img,
+                );
+            }
+            return Ok(());
+        }
+
+        for i in 1..5 {
+            println!("{:#0b}", self.decoded_data[i]);
+        }
 
         //TODO: handle components properly
         let now = Instant::now();
-        let num_components = match self.colour_type {
-            2 => 3,
-            _ => 0,
-        };
-        let paeth_predictor = |a, b, c| -> u32 {
-            let a = a as i32;
-            let b = b as i32;
-            let c = c as i32;
-            let p = a + b - c;
-            let pa = (p - a).abs();
-            let pb = (p - b).abs();
-            let pc = (p - c).abs();
-            if pa <= pb && pa <= pc {
-                a as u32
-            } else if pb <= pc {
-                b as u32
-            } else {
-                c as u32
-            }
-        };
-        self.data = Vec::with_capacity((self.width * self.height * num_components) as usize);
-
-        let mut p = Vec::with_capacity(num_components as usize);
-        for y in 0..(self.height) {
-            let row_index = y * self.width * num_components + y;
-            let filter = self.decoded_data[(row_index) as usize];
-            for x in 1..(self.width + 1) {
-                let a = |offset| -> u32 {
-                    match x {
-                        1 => 0,
-                        _ => {
-                            self.data[(self.data.len() as u32 - num_components + offset) as usize]
-                                as u32
-                        }
-                    }
-                };
-                let b = |offset| -> u32 {
-                    match y {
-                        0 => 0,
-                        _ => {
-                            self.data[(self.data.len() as u32 - self.width * num_components
-                                + offset) as usize] as u32
-                        }
-                    }
-                };
-                let c = |offset| -> u32 {
-                    match (x, y) {
-                        (1, 0) => 0,
-                        (1, _) => 0,
-                        (_, 0) => 0,
-                        (_, _) => {
-                            self.data[(self.data.len() as u32
-                                - self.width * num_components
-                                - num_components
-                                + offset) as usize] as u32
-                        }
-                    }
-                };
-
-                let xx = row_index + (x - 1) * num_components + 1;
-                match filter {
-                    0 => {
-                        for i in 0..num_components {
-                            self.data.push(self.decoded_data[(xx + i) as usize]);
-                        }
-                    }
-                    1 => {
-                        for i in 0..num_components {
-                            p.push(
-                                ((self.decoded_data[(xx + i) as usize] as u32 + a(i)) % 256) as u8,
-                            );
-                        }
-                        self.data.append(&mut p);
-                    }
-                    2 => {
-                        for i in 0..num_components {
-                            p.push(
-                                ((self.decoded_data[(xx + i) as usize] as u32 + b(i)) % 256) as u8,
-                            );
-                        }
-                        self.data.append(&mut p);
-                    }
-                    3 => {
-                        for i in 0..num_components {
-                            p.push(
-                                ((self.decoded_data[(xx + i) as usize] as u32 + (a(i) + b(i)) / 2)
-                                    % 256) as u8,
-                            );
-                        }
-                        self.data.append(&mut p);
-                    }
-                    4 => {
-                        for i in 0..num_components {
-                            p.push(
-                                ((self.decoded_data[(xx + i) as usize] as u32
-                                    + paeth_predictor(a(i), b(i), c(i)))
-                                    % 256) as u8,
-                            );
-                        }
-                        self.data.append(&mut p);
-                    }
-                    _ => {
-                        return Err("Corrupted data".to_string());
-                    }
-                }
-            }
-        }
+        self.data = self.reverse_filter(
+            self.width as usize,
+            self.height as usize,
+            num_components,
+            self.depth as usize,
+            0,
+        )?;
         println!("reverse filter phase: {:?}", now.elapsed());
 
-        use std::fs::File;
-        use std::io::prelude::*;
         let mut file = File::create("img.ppm").unwrap();
         file.write_all(b"P3 \n").unwrap();
         file.write_all(format!("{} {} \n", self.width, self.height).as_bytes())
@@ -226,6 +254,175 @@ impl Parser {
         }
 
         Ok(())
+    }
+
+    fn reverse_filter(
+        &self,
+        width: usize,
+        height: usize,
+        channels: usize,
+        depth: usize,
+        offset: usize,
+    ) -> Result<Vec<u8>, String> {
+        let mut result = Vec::with_capacity((self.width * self.height * channels as u32) as usize);
+
+        let mut data = Vec::with_capacity(width * height * channels / 8 * depth);
+        println!(
+            "Reverse filter: {}x{}@{} ({})",
+            width, height, depth, channels
+        );
+        match depth {
+            1 | 2 | 4 => {
+                println!(
+                    "Processing {} bytes",
+                    (height /*filters*/ + ((width as f32 / 8.0 * depth as f32).ceil() as usize)* height * channels)
+                );
+                for y in 0..height {
+                    let row_index = y * ((width as f32 / 8.0 * depth as f32).ceil() as usize) + y;
+                    let filter = self.decoded_data[row_index + offset];
+                    println!(
+                        "filter: {}, width: {}",
+                        filter,
+                        ((width as f32 / 8.0 * depth as f32).ceil() as usize)
+                    );
+                    for x in 0..((width as f32 / 8.0 * depth as f32).ceil() as usize) {
+                        //println!("{} {:#0b}",self.decoded_data[row_index + x + 1 + offset],
+                        //                     self.decoded_data[row_index + x + 1 + offset]);
+                        let x = self.decoded_data[row_index + x + 1 + offset];
+                        match depth {
+                            1 => {
+                                for i in 0..std::cmp::min(width, 8) {
+                                    data.push((x >> (7 - i) & 0b1) * 255);
+                                }
+                            }
+                            2 => {
+                                for i in 0..(std::cmp::min(width, 8 / 2)) {
+                                    data.push((x >> (6 - (i * 2)) & 0b11) * 85);
+                                }
+                            }
+                            4 => {
+                                for i in 0..(std::cmp::min(width, 8 / 4)) {
+                                    data.push((x >> (4 - (i * 4)) & 0b1111) * 17);
+                                }
+                            }
+                            _ => panic!(),
+                        }
+                    }
+                }
+                //for i in 0..(height /*filters*/ + width * height * channels / 8) {
+                //    data.push(self.decoded_data[i]);
+                //}
+                //panic!();
+                return Ok(data);
+            }
+            8 => {}
+            _ => return Err("Not implemented".to_string()),
+        }
+
+        let paeth_predictor = |a, b, c| -> u32 {
+            let a = a as i32;
+            let b = b as i32;
+            let c = c as i32;
+            let p = a + b - c;
+            let pa = (p - a).abs();
+            let pb = (p - b).abs();
+            let pc = (p - c).abs();
+            if pa <= pb && pa <= pc {
+                a as u32
+            } else if pb <= pc {
+                b as u32
+            } else {
+                c as u32
+            }
+        };
+
+        let mut p = Vec::with_capacity(channels as usize);
+        for y in 0..(height) {
+            let row_index = y * width * channels + y;
+            let filter = self.decoded_data[(row_index + offset) as usize];
+            for x in 1..(width + 1) {
+                let a = |offset| -> u32 {
+                    match x {
+                        1 => 0,
+                        _ => {
+                            result[(result.len() as u32 - channels as u32 + offset as u32) as usize]
+                                as u32
+                        }
+                    }
+                };
+                let b = |offset| -> u32 {
+                    match y {
+                        0 => 0,
+                        _ => result[(result.len() - width * channels + offset) as usize] as u32,
+                    }
+                };
+                let c = |offset| -> u32 {
+                    match (x, y) {
+                        (1, 0) => 0,
+                        (1, _) => 0,
+                        (_, 0) => 0,
+                        (_, _) => {
+                            result[(result.len() as u32
+                                - width as u32 * channels as u32
+                                - channels as u32
+                                + offset as u32) as usize] as u32
+                        }
+                    }
+                };
+
+                let xx = row_index + (x - 1) * channels + 1;
+                match filter {
+                    0 => {
+                        for i in 0..channels {
+                            result.push(self.decoded_data[(xx + i + offset) as usize]);
+                        }
+                    }
+                    1 => {
+                        for i in 0..channels {
+                            p.push(
+                                ((self.decoded_data[(xx + i + offset) as usize] as u32 + a(i))
+                                    % 256) as u8,
+                            );
+                        }
+                        result.append(&mut p);
+                    }
+                    2 => {
+                        for i in 0..channels {
+                            p.push(
+                                ((self.decoded_data[(xx + i + offset) as usize] as u32 + b(i))
+                                    % 256) as u8,
+                            );
+                        }
+                        result.append(&mut p);
+                    }
+                    3 => {
+                        for i in 0..channels {
+                            p.push(
+                                ((self.decoded_data[(xx + i + offset) as usize] as u32
+                                    + (a(i) + b(i)) / 2)
+                                    % 256) as u8,
+                            );
+                        }
+                        result.append(&mut p);
+                    }
+                    4 => {
+                        for i in 0..channels {
+                            p.push(
+                                ((self.decoded_data[(xx + i + offset) as usize] as u32
+                                    + paeth_predictor(a(i), b(i), c(i)))
+                                    % 256) as u8,
+                            );
+                        }
+                        result.append(&mut p);
+                    }
+                    _ => {
+                        return Err(format!("Corrupted data: {}", filter));
+                    }
+                }
+            }
+        }
+
+        Ok(result)
     }
 
     fn parse_png_header(&mut self) -> Result<(), String> {
