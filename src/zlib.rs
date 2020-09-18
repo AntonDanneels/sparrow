@@ -98,12 +98,21 @@ pub fn parse(data: &mut VecDeque<u8>) -> Result<Vec<u8>, String> {
         let b_type = buffer.get_n_bits(2);
         is_final = b_final != 0;
 
+        let mut hf_lit = HuffmanTree::new();
+        let mut hf_dist = HuffmanTree::new();
         if b_type == 0 {
             println!("No compression");
             panic!();
         } else if b_type == 0b01 {
-            println!("Fixed Huffmann");
-            panic!();
+            let mut lits = vec![8; 144];
+            lits.append(&mut vec![9; 256 - 144]);
+            lits.append(&mut vec![7; 280 - 256]);
+            lits.append(&mut vec![8; 288 - 280]);
+
+            let dists = vec![5; 32];
+
+            hf_lit = build_huffman_codes(&lits, true);
+            hf_dist = build_huffman_codes(&dists, true);
         } else if b_type == 0b10 {
             let h_lit = buffer.get_n_bits(5);
             let h_dist = buffer.get_n_bits(5);
@@ -120,52 +129,62 @@ pub fn parse(data: &mut VecDeque<u8>) -> Result<Vec<u8>, String> {
             let lits = fill_with_huffman(257 + h_lit as usize, &hf_codes, &mut buffer)?;
             let dists = fill_with_huffman(1 + h_dist as usize, &hf_codes, &mut buffer)?;
 
-            let hf_lit = build_huffman_codes(&lits, true);
-            let hf_dist = build_huffman_codes(&dists, true);
-
-            loop {
-                let val = hf_lit.find(&mut buffer);
-                if val.is_none() {
-                    return Err("Failed to find a code".to_string());
-                }
-                let val = val.unwrap();
-                match val {
-                    0..=255 => {
-                        output.push(val as u8);
-                    }
-                    256 => break,
-                    257..=285 => {
-                        let idx = (val - 257) as usize;
-                        let extra = LENGTH_EXTRA_BITS[idx];
-                        let len = LENGTHS_BASE[idx] + buffer.get_n_bits(extra);
-
-                        let dist_val = hf_dist.find(&mut buffer);
-                        if dist_val.is_none() {
-                            return Err("Failed to find a code".to_string());
-                        }
-                        let dist_val = dist_val.unwrap();
-                        if dist_val > 29 {
-                            return Err("Corrupted datastream".to_string());
-                        }
-
-                        let idx = dist_val as usize;
-                        let extra = DIST_EXTRA_BITS[idx];
-                        let dist = DIST_BASE[idx] + buffer.get_n_bits(extra);
-
-                        for _ in 0..len {
-                            let v = output[(output.len() - dist as usize)];
-                            output.push(v);
-                        }
-                    }
-                    _ => return Err("Corrupted datastream".to_string()),
-                }
-            }
+            hf_lit = build_huffman_codes(&lits, true);
+            hf_dist = build_huffman_codes(&dists, true);
         } else if b_type == 0b11 {
             return Err("Invalid header in zlib stream".to_string());
         }
+        parse_block(&hf_lit, &hf_dist, &mut buffer, &mut output)?;
     }
 
     Ok(output)
+}
+
+fn parse_block(
+    hf_lit: &HuffmanTree,
+    hf_dist: &HuffmanTree,
+    buffer: &mut BitBuffer,
+    output: &mut Vec<u8>,
+) -> Result<(), String> {
+    loop {
+        let val = hf_lit.find(buffer);
+        if val.is_none() {
+            return Err("Failed to find a code".to_string());
+        }
+        let val = val.unwrap();
+        match val {
+            0..=255 => {
+                output.push(val as u8);
+            }
+            256 => break,
+            257..=285 => {
+                let idx = (val - 257) as usize;
+                let extra = LENGTH_EXTRA_BITS[idx];
+                let len = LENGTHS_BASE[idx] + buffer.get_n_bits(extra);
+
+                let dist_val = hf_dist.find(buffer);
+                if dist_val.is_none() {
+                    return Err("Failed to find a code".to_string());
+                }
+                let dist_val = dist_val.unwrap();
+                if dist_val > 29 {
+                    return Err("Corrupted datastream".to_string());
+                }
+
+                let idx = dist_val as usize;
+                let extra = DIST_EXTRA_BITS[idx];
+                let dist = DIST_BASE[idx] + buffer.get_n_bits(extra);
+
+                for _ in 0..len {
+                    let v = output[(output.len() - dist as usize)];
+                    output.push(v);
+                }
+            }
+            _ => return Err(format!("Corrupted datastream: {}", val)),
+        }
+    }
+
+    Ok(())
 }
 
 fn fill_with_huffman(
