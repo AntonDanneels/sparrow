@@ -18,6 +18,7 @@ enum ChunkType {
     GAMA,
     SBIT,
     BKGD,
+    CHRM,
 }
 
 const fn to_u32(a: [u8; 4]) -> u32 {
@@ -481,7 +482,7 @@ impl Parser {
         let length = self.parse_uint()?;
         let chunk_type = self.parse_uint()?;
 
-        let headers: [(u32, ChunkType); 10] = [
+        let headers: [(u32, ChunkType); 11] = [
             (to_u32([73, 72, 68, 82]), ChunkType::IHDR),
             (to_u32([80, 76, 84, 69]), ChunkType::PLTE),
             (to_u32([73, 68, 65, 84]), ChunkType::IDAT),
@@ -492,6 +493,7 @@ impl Parser {
             (to_u32([103, 65, 77, 65]), ChunkType::GAMA),
             (to_u32([115, 66, 73, 84]), ChunkType::SBIT),
             (to_u32([98, 75, 71, 68]), ChunkType::BKGD),
+            (to_u32([99, 72, 82, 77]), ChunkType::CHRM),
         ];
 
         for header in &headers {
@@ -673,6 +675,20 @@ impl Parser {
         Ok(())
     }
 
+    fn parse_chrm(&mut self, _length: u32) -> Result<(), String> {
+        let _wpx = self.parse_uint()?;
+        let _wpy = self.parse_uint()?;
+        let _redx = self.parse_uint()?;
+        let _redy = self.parse_uint()?;
+        let _greenx = self.parse_uint()?;
+        let _greeny = self.parse_uint()?;
+        let _bluex = self.parse_uint()?;
+        let _bluey = self.parse_uint()?;
+
+        let _crc = self.parse_uint()?;
+        Ok(())
+    }
+
     fn parse_text(&mut self, length: u32) -> Result<(), String> {
         let mut size = 0;
         let mut keyword = Vec::new();
@@ -721,6 +737,7 @@ impl Parser {
             ChunkType::GAMA => self.parse_gama(length),
             ChunkType::SBIT => self.parse_sbit(length),
             ChunkType::BKGD => self.parse_bkgd(length),
+            ChunkType::CHRM => self.parse_chrm(length),
         }
     }
 }
