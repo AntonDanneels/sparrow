@@ -21,6 +21,7 @@ enum ChunkType {
     CHRM,
     HIST,
     TIME,
+    ITXT,
 }
 
 const fn to_u32(a: [u8; 4]) -> u32 {
@@ -484,7 +485,7 @@ impl Parser {
         let length = self.parse_u32()?;
         let chunk_type = self.parse_u32()?;
 
-        let headers: [(u32, ChunkType); 13] = [
+        let headers: [(u32, ChunkType); 14] = [
             (to_u32([73, 72, 68, 82]), ChunkType::IHDR),
             (to_u32([80, 76, 84, 69]), ChunkType::PLTE),
             (to_u32([73, 68, 65, 84]), ChunkType::IDAT),
@@ -498,6 +499,7 @@ impl Parser {
             (to_u32([99, 72, 82, 77]), ChunkType::CHRM),
             (to_u32([104, 73, 83, 84]), ChunkType::HIST),
             (to_u32([116, 73, 77, 69]), ChunkType::TIME),
+            (to_u32([105, 84, 88, 116]), ChunkType::ITXT),
         ];
 
         for header in &headers {
@@ -734,19 +736,55 @@ impl Parser {
         Ok(())
     }
 
-    fn parse_text(&mut self, length: u32) -> Result<(), String> {
+    fn parse_str(&mut self) -> Result<(String, usize), String> {
         let mut size = 0;
-        let mut keyword = Vec::new();
+        let mut result = Vec::new();
         loop {
             let c = self.parse_u8()? as char;
             size += 1;
             if c == '\0' {
                 break;
             }
-            keyword.push(c);
+            result.push(c);
         }
-        let bytes_left = length as i32 - size;
+
+        Ok((result.into_iter().collect(), size))
+    }
+
+    fn parse_itxt(&mut self, length: u32) -> Result<(), String> {
+        let mut total_size = 0;
+        let (_keyword, size) = self.parse_str()?;
+        total_size += size;
+        let _compr_flag = self.parse_u8()?;
+        let _compr_method = self.parse_u8()?;
+        let (_lang, size) = self.parse_str()?;
+        total_size += size;
+        let (_translated_keyword, size) = self.parse_str()?;
+        total_size += size;
+        total_size += 2; // compression bytes
+
+        let bytes_left = length as i32 - total_size as i32;
         if bytes_left < 0 {
+            return Err("Expected a length > 0 for text string".to_string());
+        }
+        let mut text_str = Vec::with_capacity(bytes_left as usize);
+        for _ in 0..bytes_left {
+            let c = self.parse_u8()? as char;
+            text_str.push(c);
+        }
+
+        let _text_str: String = text_str.into_iter().collect();
+
+        //println!("{}, {}, {}", _keyword, _lang, _text_str);
+
+        let _crc = self.parse_u32()?;
+        Ok(())
+    }
+
+    fn parse_text(&mut self, length: u32) -> Result<(), String> {
+        let (_keyword, size) = self.parse_str()?;
+        let bytes_left = length as usize - size;
+        if bytes_left == 0 {
             return Err("Expected a length > 0 for text string".to_string());
         }
         let mut text_str = Vec::new();
@@ -755,10 +793,9 @@ impl Parser {
             text_str.push(c);
         }
 
-        let keyword: String = keyword.into_iter().collect();
-        let text_str: String = text_str.into_iter().collect();
+        let _text_str: String = text_str.into_iter().collect();
         //println!("{}: {}", keyword, text_str);
-        let crc = self.parse_u32()?;
+        let _crc = self.parse_u32()?;
         //println!("crc: {}", crc);
 
         Ok(())
@@ -785,6 +822,7 @@ impl Parser {
             ChunkType::CHRM => self.parse_chrm(length),
             ChunkType::HIST => self.parse_hist(length),
             ChunkType::TIME => self.parse_time(length),
+            ChunkType::ITXT => self.parse_itxt(length),
         }
     }
 }
