@@ -17,6 +17,7 @@ enum ChunkType {
     ZTXT,
     GAMA,
     SBIT,
+    BKGD,
 }
 
 const fn to_u32(a: [u8; 4]) -> u32 {
@@ -480,7 +481,7 @@ impl Parser {
         let length = self.parse_uint()?;
         let chunk_type = self.parse_uint()?;
 
-        let headers: [(u32, ChunkType); 9] = [
+        let headers: [(u32, ChunkType); 10] = [
             (to_u32([73, 72, 68, 82]), ChunkType::IHDR),
             (to_u32([80, 76, 84, 69]), ChunkType::PLTE),
             (to_u32([73, 68, 65, 84]), ChunkType::IDAT),
@@ -490,6 +491,7 @@ impl Parser {
             (to_u32([122, 84, 88, 116]), ChunkType::ZTXT),
             (to_u32([103, 65, 77, 65]), ChunkType::GAMA),
             (to_u32([115, 66, 73, 84]), ChunkType::SBIT),
+            (to_u32([98, 75, 71, 68]), ChunkType::BKGD),
         ];
 
         for header in &headers {
@@ -651,6 +653,26 @@ impl Parser {
         Ok(())
     }
 
+    fn parse_bkgd(&mut self, _length: u32) -> Result<(), String> {
+        match self.colour_type {
+            ColourType::Grayscale | ColourType::GrayscaleAlpha => {
+                println!("bg: {} {}", self.parse_byte()?, self.parse_byte()?);
+            }
+            ColourType::TrueColour | ColourType::TrueColourAlpha => {
+                println!("bg r: {} {}", self.parse_byte()?, self.parse_byte()?);
+                println!("bg g: {} {}", self.parse_byte()?, self.parse_byte()?);
+                println!("bg b: {} {}", self.parse_byte()?, self.parse_byte()?);
+            }
+            ColourType::Indexed => {
+                println!("bg: {}", self.parse_byte()?);
+            }
+            ColourType::Invalid => return Err("Got bKGD before colour type".to_string()),
+        }
+
+        let _crc = self.parse_uint()?;
+        Ok(())
+    }
+
     fn parse_text(&mut self, length: u32) -> Result<(), String> {
         let mut size = 0;
         let mut keyword = Vec::new();
@@ -698,6 +720,7 @@ impl Parser {
             ChunkType::ZTXT => self.parse_ztxt(length),
             ChunkType::GAMA => self.parse_gama(length),
             ChunkType::SBIT => self.parse_sbit(length),
+            ChunkType::BKGD => self.parse_bkgd(length),
         }
     }
 }
