@@ -466,7 +466,7 @@ impl Parser {
         let header = [137, 80, 78, 71, 13, 10, 26, 10];
 
         for byte in header.iter() {
-            let b = self.parse_byte()?;
+            let b = self.parse_u8()?;
             if b != *byte as u8 {
                 return Err("Not a PNG file".to_string());
             }
@@ -480,8 +480,8 @@ impl Parser {
             return Err("Not enough data to determine chunk header".to_string());
         }
 
-        let length = self.parse_uint()?;
-        let chunk_type = self.parse_uint()?;
+        let length = self.parse_u32()?;
+        let chunk_type = self.parse_u32()?;
 
         let headers: [(u32, ChunkType); 12] = [
             (to_u32([73, 72, 68, 82]), ChunkType::IHDR),
@@ -514,7 +514,7 @@ impl Parser {
         return Err("Unknown chunk header".to_string());
     }
 
-    fn parse_uint(&mut self) -> Result<u32, String> {
+    fn parse_u32(&mut self) -> Result<u32, String> {
         let mut result: u32 = 0;
         if self.compressed_data.len() < 4 {
             return Err("Not enough data".to_string());
@@ -540,7 +540,7 @@ impl Parser {
         Ok(result)
     }
 
-    fn parse_byte(&mut self) -> Result<u8, String> {
+    fn parse_u8(&mut self) -> Result<u8, String> {
         if self.compressed_data.len() < 1 {
             return Err("Not enough data".to_string());
         }
@@ -549,10 +549,10 @@ impl Parser {
     }
 
     fn parse_ihdr(&mut self, _: u32) -> Result<(), String> {
-        self.width = self.parse_uint()?;
-        self.height = self.parse_uint()?;
-        self.depth = self.parse_byte()?;
-        self.colour_type = match self.parse_byte()? {
+        self.width = self.parse_u32()?;
+        self.height = self.parse_u32()?;
+        self.depth = self.parse_u8()?;
+        self.colour_type = match self.parse_u8()? {
             0 => ColourType::Grayscale,
             2 => ColourType::TrueColour,
             3 => ColourType::Indexed,
@@ -560,11 +560,11 @@ impl Parser {
             6 => ColourType::TrueColourAlpha,
             _ => ColourType::Invalid,
         };
-        self.compression = self.parse_byte()?;
-        self.filter = self.parse_byte()?;
-        self.interlace = self.parse_byte()?;
+        self.compression = self.parse_u8()?;
+        self.filter = self.parse_u8()?;
+        self.interlace = self.parse_u8()?;
 
-        let _crc = self.parse_uint()?;
+        let _crc = self.parse_u32()?;
         Ok(())
     }
 
@@ -576,7 +576,7 @@ impl Parser {
         self.encoded_data.append(&mut self.compressed_data);
         self.compressed_data = new_data;
 
-        let _crc = self.parse_uint()?;
+        let _crc = self.parse_u32()?;
         Ok(())
     }
 
@@ -587,13 +587,13 @@ impl Parser {
 
         self.plte = Vec::with_capacity((length / 3) as usize);
         for _ in 0..(length / 3) {
-            let r = self.parse_byte()?;
-            let g = self.parse_byte()?;
-            let b = self.parse_byte()?;
+            let r = self.parse_u8()?;
+            let g = self.parse_u8()?;
+            let b = self.parse_u8()?;
             self.plte.push((r, g, b));
         }
 
-        let _crc = self.parse_uint()?;
+        let _crc = self.parse_u32()?;
         Ok(())
     }
 
@@ -601,7 +601,7 @@ impl Parser {
         let mut size = 0;
         let mut keyword = Vec::new();
         loop {
-            let c = self.parse_byte()? as char;
+            let c = self.parse_u8()? as char;
             size += 1;
             if c == '\0' {
                 break;
@@ -611,96 +611,96 @@ impl Parser {
                 return Err("Corrupted PNG zTXt header".to_string());
             }
         }
-        let _method = self.parse_byte()?;
+        let _method = self.parse_u8()?;
         for _ in 0..(length - size - 1) {
-            self.parse_byte()?;
+            self.parse_u8()?;
         }
 
-        let _crc = self.parse_uint()?;
+        let _crc = self.parse_u32()?;
         Ok(())
     }
 
     fn parse_phys(&mut self, length: u32) -> Result<(), String> {
-        let ppu_x = self.parse_uint()?;
-        let ppu_y = self.parse_uint()?;
-        let unit = self.parse_byte()?;
+        let ppu_x = self.parse_u32()?;
+        let ppu_y = self.parse_u32()?;
+        let unit = self.parse_u8()?;
 
         //println!("PPU: {}x{} ({})", ppu_x, ppu_y, unit);
 
-        let _crc = self.parse_uint()?;
+        let _crc = self.parse_u32()?;
         Ok(())
     }
 
     fn parse_iend(&mut self, length: u32) -> Result<(), String> {
         self.has_end = true;
-        let _crc = self.parse_uint()?;
+        let _crc = self.parse_u32()?;
         Ok(())
     }
 
     fn parse_gama(&mut self, length: u32) -> Result<(), String> {
-        let gamma = self.parse_uint()?;
-        let _crc = self.parse_uint()?;
+        let gamma = self.parse_u32()?;
+        let _crc = self.parse_u32()?;
         Ok(())
     }
 
     fn parse_sbit(&mut self, _length: u32) -> Result<(), String> {
         match self.colour_type {
             ColourType::Grayscale => {
-                println!("g: {}", self.parse_byte()?);
+                println!("g: {}", self.parse_u8()?);
             }
             ColourType::TrueColour | ColourType::Indexed => {
-                println!("r: {}", self.parse_byte()?);
-                println!("g: {}", self.parse_byte()?);
-                println!("b: {}", self.parse_byte()?);
+                println!("r: {}", self.parse_u8()?);
+                println!("g: {}", self.parse_u8()?);
+                println!("b: {}", self.parse_u8()?);
             }
             ColourType::GrayscaleAlpha => {
-                println!("g: {}", self.parse_byte()?);
-                println!("a: {}", self.parse_byte()?);
+                println!("g: {}", self.parse_u8()?);
+                println!("a: {}", self.parse_u8()?);
             }
             ColourType::TrueColourAlpha => {
-                println!("r: {}", self.parse_byte()?);
-                println!("g: {}", self.parse_byte()?);
-                println!("b: {}", self.parse_byte()?);
-                println!("a: {}", self.parse_byte()?);
+                println!("r: {}", self.parse_u8()?);
+                println!("g: {}", self.parse_u8()?);
+                println!("b: {}", self.parse_u8()?);
+                println!("a: {}", self.parse_u8()?);
             }
             ColourType::Invalid => return Err("Got sBIT before colour type".to_string()),
         }
 
-        let _crc = self.parse_uint()?;
+        let _crc = self.parse_u32()?;
         Ok(())
     }
 
     fn parse_bkgd(&mut self, _length: u32) -> Result<(), String> {
         match self.colour_type {
             ColourType::Grayscale | ColourType::GrayscaleAlpha => {
-                println!("bg: {} {}", self.parse_byte()?, self.parse_byte()?);
+                println!("bg: {} {}", self.parse_u8()?, self.parse_u8()?);
             }
             ColourType::TrueColour | ColourType::TrueColourAlpha => {
-                println!("bg r: {} {}", self.parse_byte()?, self.parse_byte()?);
-                println!("bg g: {} {}", self.parse_byte()?, self.parse_byte()?);
-                println!("bg b: {} {}", self.parse_byte()?, self.parse_byte()?);
+                println!("bg r: {} {}", self.parse_u8()?, self.parse_u8()?);
+                println!("bg g: {} {}", self.parse_u8()?, self.parse_u8()?);
+                println!("bg b: {} {}", self.parse_u8()?, self.parse_u8()?);
             }
             ColourType::Indexed => {
-                println!("bg: {}", self.parse_byte()?);
+                println!("bg: {}", self.parse_u8()?);
             }
             ColourType::Invalid => return Err("Got bKGD before colour type".to_string()),
         }
 
-        let _crc = self.parse_uint()?;
+        let _crc = self.parse_u32()?;
         Ok(())
     }
 
     fn parse_chrm(&mut self, _length: u32) -> Result<(), String> {
-        let _wpx = self.parse_uint()?;
-        let _wpy = self.parse_uint()?;
-        let _redx = self.parse_uint()?;
-        let _redy = self.parse_uint()?;
-        let _greenx = self.parse_uint()?;
-        let _greeny = self.parse_uint()?;
-        let _bluex = self.parse_uint()?;
-        let _bluey = self.parse_uint()?;
+        let _wpx = self.parse_u32()?;
+        let _wpy = self.parse_u32()?;
+        let _redx = self.parse_u32()?;
+        let _redy = self.parse_u32()?;
+        let _greenx = self.parse_u32()?;
+        let _greeny = self.parse_u32()?;
+        let _bluex = self.parse_u32()?;
+        let _bluey = self.parse_u32()?;
 
-        let _crc = self.parse_uint()?;
+        let _crc = self.parse_u32()?;
         Ok(())
     }
 
@@ -710,7 +710,7 @@ impl Parser {
             hist.push(self.parse_u16()?);
         }
 
-        let _crc = self.parse_uint()?;
+        let _crc = self.parse_u32()?;
         Ok(())
     }
 
@@ -718,7 +718,7 @@ impl Parser {
         let mut size = 0;
         let mut keyword = Vec::new();
         loop {
-            let c = self.parse_byte()? as char;
+            let c = self.parse_u8()? as char;
             size += 1;
             if c == '\0' {
                 break;
@@ -731,14 +731,14 @@ impl Parser {
         }
         let mut text_str = Vec::new();
         for _ in 0..bytes_left {
-            let c = self.parse_byte()? as char;
+            let c = self.parse_u8()? as char;
             text_str.push(c);
         }
 
         let keyword: String = keyword.into_iter().collect();
         let text_str: String = text_str.into_iter().collect();
         //println!("{}: {}", keyword, text_str);
-        let crc = self.parse_uint()?;
+        let crc = self.parse_u32()?;
         //println!("crc: {}", crc);
 
         Ok(())
