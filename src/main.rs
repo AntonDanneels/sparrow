@@ -20,6 +20,7 @@ enum ChunkType {
     BKGD,
     CHRM,
     HIST,
+    TIME,
 }
 
 const fn to_u32(a: [u8; 4]) -> u32 {
@@ -483,7 +484,7 @@ impl Parser {
         let length = self.parse_u32()?;
         let chunk_type = self.parse_u32()?;
 
-        let headers: [(u32, ChunkType); 12] = [
+        let headers: [(u32, ChunkType); 13] = [
             (to_u32([73, 72, 68, 82]), ChunkType::IHDR),
             (to_u32([80, 76, 84, 69]), ChunkType::PLTE),
             (to_u32([73, 68, 65, 84]), ChunkType::IDAT),
@@ -496,6 +497,7 @@ impl Parser {
             (to_u32([98, 75, 71, 68]), ChunkType::BKGD),
             (to_u32([99, 72, 82, 77]), ChunkType::CHRM),
             (to_u32([104, 73, 83, 84]), ChunkType::HIST),
+            (to_u32([116, 73, 77, 69]), ChunkType::TIME),
         ];
 
         for header in &headers {
@@ -714,6 +716,24 @@ impl Parser {
         Ok(())
     }
 
+    fn parse_time(&mut self, _length: u32) -> Result<(), String> {
+        let _year1 = self.parse_u8()?;
+        let _year2 = self.parse_u8()?;
+        let _month = self.parse_u8()?;
+        let _day = self.parse_u8()?;
+        let _hour = self.parse_u8()?;
+        let _min = self.parse_u8()?;
+        let _sec = self.parse_u8()?;
+
+        println!(
+            "Last modification time: {}{}/{}/{} {}:{}:{}",
+            _year1, _year2, _month, _day, _hour, _min, _sec
+        );
+
+        let _crc = self.parse_u32()?;
+        Ok(())
+    }
+
     fn parse_text(&mut self, length: u32) -> Result<(), String> {
         let mut size = 0;
         let mut keyword = Vec::new();
@@ -764,6 +784,7 @@ impl Parser {
             ChunkType::BKGD => self.parse_bkgd(length),
             ChunkType::CHRM => self.parse_chrm(length),
             ChunkType::HIST => self.parse_hist(length),
+            ChunkType::TIME => self.parse_time(length),
         }
     }
 }
