@@ -36,15 +36,13 @@ def test_load_image(name):
     except:
         should_fail = True
 
+    img = img.convert(mode="RGBA")
     result = subprocess.run([EXECUTABLE_PATH, name], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    if result.returncode is not 0:
-        print(result.stderr)
-    assert (result.returncode != 0) == should_fail
+    assert (result.returncode != 0) == should_fail, "Image loading failed: {}".format(result.stderr)
     if should_fail:
         return
 
     original = img.getdata()
-    length = 1 if isinstance(original[0], int) else 3
     pixels = []
     with open("img.ppm") as f:
         assert f.readline().strip() == "P3"
@@ -52,12 +50,7 @@ def test_load_image(name):
         max_val = f.readline().strip()
         for i in range(int(w) * int(h)):
             data = f.readline().strip().split(" ")
-            if length == 1:
-                pixels.append(int(data[0]))
-            elif length == 3:
-                pixels.append((int(data[0]), int(data[1]), int(data[2])))
-            else:
-                assert False
+            pixels.append(( int(data[0]), int(data[1]), int(data[2]), int(data[3]) ))
 
     for x, y in zip(pixels, original):
         assert x == y
