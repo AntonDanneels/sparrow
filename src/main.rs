@@ -4,7 +4,7 @@ use std::io::prelude::*;
 use std::time::Instant;
 mod zlib;
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 enum ChunkType {
     /* Required */
     IHDR,
@@ -22,6 +22,7 @@ enum ChunkType {
     HIST,
     TIME,
     ITXT,
+    TRNS,
 
     /* Not defined by the spec */
     UNKNOWN,
@@ -56,7 +57,9 @@ struct Parser {
     compression: u8,
     filter: u8,
     interlace: u8,
-    plte: Vec<(u8, u8, u8)>,
+    plte: Vec<(u8, u8, u8, u8)>,
+    transparency: (u16, u16, u16),
+    has_transparency: bool,
     // File data: PNG chunks
     compressed_data: VecDeque<u8>,
 
@@ -67,6 +70,27 @@ struct Parser {
     decoded_data: Vec<u8>,
     // reconstructed image
     data: Vec<u8>,
+}
+
+fn visit(
+    image: &mut Vec<u8>,
+    data: &Vec<u8>,
+    width: usize,
+    x: usize,
+    y: usize,
+    w: usize,
+    h: usize,
+    num_components: usize,
+) {
+    for yy in 0..h {
+        for xx in 0..w {
+            for i in 0..num_components {
+                image[(x + xx) * num_components
+                    + i
+                    + (y + yy) * (width * num_components) as usize] = data[i];
+            }
+        }
+    }
 }
 
 impl Parser {
@@ -80,6 +104,8 @@ impl Parser {
             filter: 0,
             interlace: 0,
             plte: Vec::new(),
+            transparency: (255, 255, 255),
+            has_transparency: false,
             compressed_data: VecDeque::new(),
             has_end: false,
             encoded_data: VecDeque::new(),
@@ -142,28 +168,17 @@ impl Parser {
                     return Err("Missing PLTE chunk".to_string());
                 }
 
-                3
+                4
             }
             ColourType::GrayscaleAlpha => 2,
             ColourType::TrueColourAlpha => 4,
             _ => panic!(),
         };
 
-        let visit = |image: &mut Vec<u8>, data: &Vec<u8>, x, y, w, h| {
-            for yy in 0..h {
-                for xx in 0..w {
-                    for i in 0..num_components {
-                        image[(x + xx) * num_components
-                            + i
-                            + (y + yy) * (self.width * num_components as u32) as usize] = data[i];
-                    }
-                }
-            }
-        };
         let now = Instant::now();
         if self.interlace == 1 {
             let mut offset = 0;
-            let mut img = vec![0; (self.width * self.height * num_components as u32) as usize];
+            self.data = vec![0; (self.width * self.height * num_components as u32) as usize];
             for pass in 0..7 as usize {
                 let mut row = STARTING_ROW[pass];
                 let w = ((self.width as i32 - STARTING_COL[pass] as i32
@@ -182,8 +197,7 @@ impl Parser {
                     ColourType::Indexed => 1,
                     _ => num_components,
                 };
-                let data =
-                    self.reverse_filter(w, h, bytes_needed, self.depth as usize, offset)?;
+                let data = self.reverse_filter(w, h, bytes_needed, self.depth as usize, offset)?;
                 offset += h /*filters*/ +
                           ((w as f32 / 8.0 * self.depth as f32).ceil() as usize) * h * bytes_needed;
 
@@ -196,12 +210,14 @@ impl Parser {
                             d.push(data[index + i]);
                         }
                         visit(
-                            &mut img,
+                            &mut self.data,
                             &d,
+                            self.width as usize,
                             col,
                             row,
                             min(BLOCK_WIDTH[pass], self.width as usize - col),
                             min(BLOCK_HEIGHT[pass], self.height as usize - row),
+                            num_components,
                         );
                         col += COL_INCREMENT[pass];
                         index += num_components;
@@ -209,34 +225,69 @@ impl Parser {
                     row += ROW_INCREMENT[pass];
                 }
             }
-            write_img(
-                format!("img.ppm"),
+        } else {
+            let bytes_needed = match self.colour_type {
+                ColourType::Indexed => 1,
+                _ => num_components,
+            };
+            self.data = self.reverse_filter(
                 self.width as usize,
                 self.height as usize,
-                num_components,
-                &img,
-            );
-            return Ok(());
+                bytes_needed,
+                self.depth as usize,
+                0,
+            )?;
         }
 
-        let bytes_needed = match self.colour_type {
-            ColourType::Indexed => 1,
-            _ => num_components,
-        };
-        self.data = self.reverse_filter(
-            self.width as usize,
-            self.height as usize,
-            bytes_needed,
-            self.depth as usize,
-            0,
-        )?;
         println!("reverse filter phase: {:?}", now.elapsed());
+
+        if self.has_transparency {
+            match self.colour_type {
+                ColourType::Grayscale => {
+                    let mut new_data = Vec::with_capacity(self.data.len() * 2);
+                    for i in 0..(self.data.len()) {
+                        new_data.push(self.data[i]);
+                        if self.data[i] == self.transparency.0 as u8 {
+                            new_data.push(0);
+                        } else {
+                            new_data.push(255);
+                        }
+                    }
+                    self.data = new_data;
+                    self.colour_type = ColourType::GrayscaleAlpha;
+                }
+                ColourType::TrueColour => {
+                    let mut new_data = Vec::with_capacity(self.data.len() / 3 * 4);
+                    for i in 0..(self.data.len() / 3) {
+                        new_data.push(self.data[i * 3 + 0]);
+                        new_data.push(self.data[i * 3 + 1]);
+                        new_data.push(self.data[i * 3 + 2]);
+                        if self.data[i * 3] == self.transparency.0 as u8
+                            && self.data[i * 3 + 1] == self.transparency.1 as u8
+                            && self.data[i * 3 + 2] == self.transparency.2 as u8
+                        {
+                            new_data.push(0);
+                        } else {
+                            new_data.push(255);
+                        }
+                    }
+                    self.data = new_data;
+                    self.colour_type = ColourType::TrueColourAlpha;
+                }
+                _ => {
+                    return Err(format!(
+                        "Cannot have transparency for {:?}",
+                        self.colour_type
+                    ))
+                }
+            }
+        }
 
         write_img(
             format!("img.ppm"),
             self.width as usize,
             self.height as usize,
-            num_components,
+            &self.colour_type,
             &self.data,
         );
 
@@ -385,6 +436,7 @@ impl Parser {
                             data.push(self.plte[x as usize].0);
                             data.push(self.plte[x as usize].1);
                             data.push(self.plte[x as usize].2);
+                            data.push(self.plte[x as usize].3);
                         } else {
                             data.push(x as u8 * DEPTH_SCALE[depth]);
                         }
@@ -405,6 +457,7 @@ impl Parser {
                         data.push(self.plte[result[i] as usize].0);
                         data.push(self.plte[result[i] as usize].1);
                         data.push(self.plte[result[i] as usize].2);
+                        data.push(self.plte[result[i] as usize].3);
                     }
                     return Ok(data);
                 }
@@ -436,7 +489,7 @@ impl Parser {
         let length = self.parse_u32()?;
         let chunk_type = self.parse_u32()?;
 
-        let headers: [(u32, ChunkType); 14] = [
+        let headers: [(u32, ChunkType); 15] = [
             (to_u32([73, 72, 68, 82]), ChunkType::IHDR),
             (to_u32([80, 76, 84, 69]), ChunkType::PLTE),
             (to_u32([73, 68, 65, 84]), ChunkType::IDAT),
@@ -451,6 +504,7 @@ impl Parser {
             (to_u32([104, 73, 83, 84]), ChunkType::HIST),
             (to_u32([116, 73, 77, 69]), ChunkType::TIME),
             (to_u32([105, 84, 88, 116]), ChunkType::ITXT),
+            (to_u32([116, 82, 78, 83]), ChunkType::TRNS),
         ];
 
         for header in &headers {
@@ -489,7 +543,7 @@ impl Parser {
         }
         for i in 0..2 {
             let byte = self.compressed_data.pop_front().unwrap() as u32;
-            result |= byte << 8 * (3 - i);
+            result |= byte << 8 * (1 - i);
         }
 
         Ok(result)
@@ -549,8 +603,9 @@ impl Parser {
             let r = self.parse_u8()?;
             let g = self.parse_u8()?;
             let b = self.parse_u8()?;
-            self.plte.push((r, g, b));
+            self.plte.push((r, g, b, 255));
         }
+        println!("{:?}", self.plte);
 
         let _crc = self.parse_u32()?;
         Ok(())
@@ -590,14 +645,15 @@ impl Parser {
         Ok(())
     }
 
-    fn parse_iend(&mut self, length: u32) -> Result<(), String> {
+    fn parse_iend(&mut self, _length: u32) -> Result<(), String> {
         self.has_end = true;
         let _crc = self.parse_u32()?;
         Ok(())
     }
 
-    fn parse_gama(&mut self, length: u32) -> Result<(), String> {
+    fn parse_gama(&mut self, _length: u32) -> Result<(), String> {
         let gamma = self.parse_u32()?;
+        println!("Gamma: {} {}", gamma, gamma as f32 / 100000.0);
         let _crc = self.parse_u32()?;
         Ok(())
     }
@@ -691,6 +747,44 @@ impl Parser {
         Ok(())
     }
 
+    fn parse_trns(&mut self, length: u32) -> Result<(), String> {
+        match self.colour_type {
+            ColourType::Grayscale => {
+                let rgb = (self.parse_u8()? as u16) << 8 | self.parse_u8()? as u16;
+                println!("rgb: {}", rgb);
+                self.transparency = (rgb, rgb, rgb);
+                self.has_transparency = true;
+            }
+            ColourType::TrueColour => {
+                let r = (self.parse_u8()? as u16) << 8 | self.parse_u8()? as u16;
+                let g = (self.parse_u8()? as u16) << 8 | self.parse_u8()? as u16;
+                let b = (self.parse_u8()? as u16) << 8 | self.parse_u8()? as u16;
+                println!("rgb: {}, {}, {}", r, g, b);
+                self.transparency = (r, g, b);
+                self.has_transparency = true;
+            }
+            ColourType::Indexed => {
+                if self.plte.len() == 0 {
+                    return Err("Expected PLTE before TRNS chunk".to_string());
+                }
+                for i in 0..length as usize {
+                    let a = self.parse_u8()?;
+                    self.plte[i].3 = a;
+                }
+                println!("size: {}", self.plte.len());
+            }
+            ColourType::Invalid => {
+                return Err("Expected IHDR before TRNS chunk".to_string());
+            }
+            _ => {
+                return Err(format!("Not valid for ColourType: {:?}", self.colour_type));
+            }
+        }
+
+        let _crc = self.parse_u32()?;
+        Ok(())
+    }
+
     fn parse_str(&mut self) -> Result<(String, usize), String> {
         let mut size = 0;
         let mut result = Vec::new();
@@ -763,6 +857,7 @@ impl Parser {
         }
 
         let (chunk_type, length) = chunk_type.unwrap();
+        println!("{:?}", chunk_type);
         match chunk_type {
             ChunkType::IHDR => self.parse_ihdr(length),
             ChunkType::IDAT => self.parse_idat(length),
@@ -778,6 +873,7 @@ impl Parser {
             ChunkType::HIST => self.parse_hist(length),
             ChunkType::TIME => self.parse_time(length),
             ChunkType::ITXT => self.parse_itxt(length),
+            ChunkType::TRNS => self.parse_trns(length),
 
             ChunkType::UNKNOWN => {
                 if self.compressed_data.len() < length as usize {
@@ -793,7 +889,8 @@ impl Parser {
     }
 }
 
-fn write_img(name: String, w: usize, h: usize, num_components: usize, data: &Vec<u8>) {
+fn write_img(name: String, w: usize, h: usize, colour: &ColourType, data: &Vec<u8>) {
+    let debug = false;
     let mut file = File::create(name).unwrap();
     file.write_all(b"P3 \n").unwrap();
     file.write_all(format!("{} {} \n", w, h).as_bytes())
@@ -801,38 +898,62 @@ fn write_img(name: String, w: usize, h: usize, num_components: usize, data: &Vec
     file.write_all(b"255 \n").unwrap();
     let mut i = 0;
     while i < data.len() {
-        match num_components {
-            1 => {
-                file.write_all(format!("{} {} {} {}\n", data[i], data[i], data[i], 255).as_bytes())
-                    .unwrap();
+        match colour {
+            ColourType::Grayscale => {
+                if debug {
+                    file.write_all(format!("{} {} {}\n", data[i], data[i], data[i]).as_bytes())
+                        .unwrap();
+                } else {
+                    file.write_all(format!("{} {} {} 255\n", data[i], data[i], data[i]).as_bytes())
+                        .unwrap();
+                }
                 i += 1;
             }
-            2 => {
-                file.write_all(
-                    format!("{} {} {} {}\n", data[i], data[i], data[i], data[i + 1]).as_bytes(),
-                )
-                .unwrap();
+            ColourType::GrayscaleAlpha => {
+                if debug {
+                    file.write_all(format!("{} {} {}\n", data[i], data[i], data[i]).as_bytes())
+                        .unwrap();
+                } else {
+                    file.write_all(
+                        format!("{} {} {} {}\n", data[i], data[i], data[i], data[i + 1]).as_bytes(),
+                    )
+                    .unwrap();
+                }
                 i += 2;
             }
-            3 => {
-                file.write_all(
-                    format!("{} {} {} {}\n", data[i], data[i + 1], data[i + 2], 255).as_bytes(),
-                )
-                .unwrap();
+            ColourType::TrueColour => {
+                if debug {
+                    file.write_all(
+                        format!("{} {} {}\n", data[i], data[i + 1], data[i + 2]).as_bytes(),
+                    )
+                    .unwrap();
+                } else {
+                    file.write_all(
+                        format!("{} {} {} 255\n", data[i], data[i + 1], data[i + 2]).as_bytes(),
+                    )
+                    .unwrap();
+                }
                 i += 3;
             }
-            4 => {
-                file.write_all(
-                    format!(
-                        "{} {} {} {}\n",
-                        data[i],
-                        data[i + 1],
-                        data[i + 2],
-                        data[i + 3]
+            ColourType::TrueColourAlpha | ColourType::Indexed => {
+                if debug {
+                    file.write_all(
+                        format!("{} {} {}\n", data[i], data[i + 1], data[i + 2]).as_bytes(),
                     )
-                    .as_bytes(),
-                )
-                .unwrap();
+                    .unwrap();
+                } else {
+                    file.write_all(
+                        format!(
+                            "{} {} {} {}\n",
+                            data[i],
+                            data[i + 1],
+                            data[i + 2],
+                            data[i + 3]
+                        )
+                        .as_bytes(),
+                    )
+                    .unwrap();
+                }
                 i += 4;
             }
             _ => panic!(),
