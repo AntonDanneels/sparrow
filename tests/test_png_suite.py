@@ -33,16 +33,16 @@ def test_load_image(name):
     should_fail = False
     try:
         img = Image.open(name)
+        img = img.convert(mode="RGBA")
+        original = img.getdata()
     except:
         should_fail = True
 
-    img = img.convert(mode="RGBA")
     result = subprocess.run([EXECUTABLE_PATH, name], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     assert (result.returncode != 0) == should_fail, "Image loading failed: {}".format(result.stderr)
     if should_fail:
         return
 
-    original = img.getdata()
     pixels = []
     with open("img.ppm") as f:
         assert f.readline().strip() == "P3"
