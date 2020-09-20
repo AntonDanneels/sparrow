@@ -144,6 +144,8 @@ impl Parser {
 
                 3
             }
+            ColourType::GrayscaleAlpha => 2,
+            ColourType::TrueColourAlpha => 4,
             _ => panic!(),
         };
 
@@ -218,10 +220,14 @@ impl Parser {
             return Ok(());
         }
 
+        let bytes_needed = match self.colour_type {
+            ColourType::Indexed => 1,
+            _ => num_components,
+        };
         self.data = self.reverse_filter(
             self.width as usize,
             self.height as usize,
-            num_components,
+            bytes_needed,
             self.depth as usize,
             0,
         )?;
