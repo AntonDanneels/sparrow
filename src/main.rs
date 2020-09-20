@@ -22,6 +22,9 @@ enum ChunkType {
     HIST,
     TIME,
     ITXT,
+
+    /* Not defined by the spec */
+    UNKNOWN,
 }
 
 const fn to_u32(a: [u8; 4]) -> u32 {
@@ -509,13 +512,13 @@ impl Parser {
         }
 
         println!(
-            "{} {} {} {}",
+            "Unknown chunk header, ignoring: {} {} {} {}",
             chunk_type >> 24 & 0xff,
             chunk_type >> 16 & 0xff,
             chunk_type >> 8 & 0xff,
             chunk_type & 0xff,
         );
-        return Err("Unknown chunk header".to_string());
+        Ok((ChunkType::UNKNOWN, length))
     }
 
     fn parse_u32(&mut self) -> Result<u32, String> {
@@ -823,6 +826,17 @@ impl Parser {
             ChunkType::HIST => self.parse_hist(length),
             ChunkType::TIME => self.parse_time(length),
             ChunkType::ITXT => self.parse_itxt(length),
+
+            ChunkType::UNKNOWN => {
+                if self.compressed_data.len() < length as usize {
+                    return Err("Not enough data".to_string());
+                }
+                let new_data = self.compressed_data.split_off(length as usize);
+                self.compressed_data = new_data;
+
+                let _crc = self.parse_u32()?;
+                Ok(())
+            }
         }
     }
 }
