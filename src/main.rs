@@ -369,48 +369,29 @@ impl Parser {
             }
         }
 
+        const DEPTH_SCALE: [u8; 5] = [0, 255, 85, 0, 17];
         match depth {
             1 | 2 | 4 => {
-                for i in 0..result.len() {
-                    let x = result[i];
-                    match depth {
-                        1 => {
-                            for i in 0..std::cmp::min(width, 8) {
-                                let index = (x >> (7 - i) & 0b1) as usize;
-                                if self.colour_type == ColourType::Indexed {
-                                    data.push(self.plte[index].0);
-                                    data.push(self.plte[index].1);
-                                    data.push(self.plte[index].2);
-                                } else {
-                                    data.push((x >> (7 - i) & 0b1) * 255);
-                                }
-                            }
+                let mut current_byte = 0;
+                for _ in 0..height {
+                    let mut num_bits = 0;
+                    for _ in 0..width {
+                        let x =
+                            result[current_byte] >> ((8 - depth) - num_bits) & ((1 << depth) - 1);
+                        if self.colour_type == ColourType::Indexed {
+                            data.push(self.plte[x as usize].0);
+                            data.push(self.plte[x as usize].1);
+                            data.push(self.plte[x as usize].2);
+                        } else {
+                            data.push(x as u8 * DEPTH_SCALE[depth]);
                         }
-                        2 => {
-                            for i in 0..(std::cmp::min(width, 8 / 2)) {
-                                let index = (x >> (6 - (i * 2)) & 0b11) as usize;
-                                if self.colour_type == ColourType::Indexed {
-                                    data.push(self.plte[index].0);
-                                    data.push(self.plte[index].1);
-                                    data.push(self.plte[index].2);
-                                } else {
-                                    data.push((x >> (6 - (i * 2)) & 0b11) * 85);
-                                }
-                            }
+                        if num_bits + depth >= 8 {
+                            current_byte += 1;
                         }
-                        4 => {
-                            for i in 0..(std::cmp::min(width, 8 / 4)) {
-                                let index = (x >> (4 - (i * 4)) & 0b1111) as usize;
-                                if self.colour_type == ColourType::Indexed {
-                                    data.push(self.plte[index].0);
-                                    data.push(self.plte[index].1);
-                                    data.push(self.plte[index].2);
-                                } else {
-                                    data.push((x >> (4 - (i * 4)) & 0b1111) * 17);
-                                }
-                            }
-                        }
-                        _ => panic!(),
+                        num_bits = (num_bits + depth) % 8;
+                    }
+                    if num_bits > 0 {
+                        current_byte += 1;
                     }
                 }
                 return Ok(data);
