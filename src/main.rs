@@ -166,10 +166,6 @@ impl Parser {
             let mut offset = 0;
             let mut img = vec![122; (self.width * self.height * num_components as u32) as usize];
             for pass in 0..7 {
-                println!(
-                    "----------------------PASS: {}---------------------------",
-                    pass
-                );
                 let mut row = STARTING_ROW[pass];
                 let tmp_w = self.width as usize / COL_INCREMENT[pass];
                 let tmp_h = self.height as usize / ROW_INCREMENT[pass];
