@@ -160,30 +160,33 @@ impl Parser {
                 }
             }
         };
-
         let now = Instant::now();
         if self.interlace == 1 {
             let mut offset = 0;
-            let mut img = vec![122; (self.width * self.height * num_components as u32) as usize];
-            for pass in 0..7 {
+            let mut img = vec![0; (self.width * self.height * num_components as u32) as usize];
+            for pass in 0..7 as usize {
                 let mut row = STARTING_ROW[pass];
-                let tmp_w = self.width as usize / COL_INCREMENT[pass];
-                let tmp_h = self.height as usize / ROW_INCREMENT[pass];
+                let w = ((self.width as i32 - STARTING_COL[pass] as i32
+                    + COL_INCREMENT[pass] as i32
+                    - 1)
+                    / COL_INCREMENT[pass] as i32) as usize;
+                let h = ((self.height as i32 - STARTING_ROW[pass] as i32
+                    + ROW_INCREMENT[pass] as i32
+                    - 1)
+                    / ROW_INCREMENT[pass] as i32) as usize;
+
+                if w == 0 || h == 0 {
+                    continue;
+                }
                 let bytes_needed = match self.colour_type {
                     ColourType::Indexed => 1,
                     _ => num_components,
                 };
-                let data = self.reverse_filter(
-                    self.width as usize / COL_INCREMENT[pass],
-                    self.height as usize / ROW_INCREMENT[pass],
-                    bytes_needed,
-                    self.depth as usize,
-                    offset,
-                )?;
-                offset += tmp_h
-                    + ((tmp_w as f32 / 8.0 * self.depth as f32).ceil() as usize)
-                        * tmp_h
-                        * bytes_needed;
+                let data =
+                    self.reverse_filter(w, h, bytes_needed, self.depth as usize, offset)?;
+                offset += h /*filters*/ +
+                          ((w as f32 / 8.0 * self.depth as f32).ceil() as usize) * h * bytes_needed;
+
                 let mut index = 0;
                 while row < self.height as usize {
                     let mut col = STARTING_COL[pass];
