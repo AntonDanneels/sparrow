@@ -164,33 +164,6 @@ impl Parser {
             }
         };
 
-        let write_img = |name: String, w: usize, h: usize, data: &Vec<u8>| {
-            let mut file = File::create(name).unwrap();
-            file.write_all(b"P3 \n").unwrap();
-            file.write_all(format!("{} {} \n", w, h).as_bytes())
-                .unwrap();
-            file.write_all(b"255 \n").unwrap();
-            let mut i = 0;
-            while i < data.len() {
-                match num_components {
-                    1 => {
-                        file.write_all(
-                            format!("{} {} {} \n", data[i], data[i], data[i],).as_bytes(),
-                        )
-                        .unwrap();
-                        i += 1;
-                    }
-                    3 => {
-                        file.write_all(
-                            format!("{} {} {} \n", data[i], data[i + 1], data[i + 2],).as_bytes(),
-                        )
-                        .unwrap();
-                        i += 3;
-                    }
-                    _ => panic!(),
-                }
-            }
-        };
         let now = Instant::now();
         if self.interlace == 1 {
             let mut offset = 0;
@@ -239,13 +212,14 @@ impl Parser {
                     }
                     row += ROW_INCREMENT[pass];
                 }
-                write_img(
-                    format!("pass_{}.ppm", pass),
-                    self.width as usize,
-                    self.height as usize,
-                    &img,
-                );
             }
+            write_img(
+                format!("img.ppm"),
+                self.width as usize,
+                self.height as usize,
+                num_components,
+                &img,
+            );
             return Ok(());
         }
 
@@ -258,25 +232,13 @@ impl Parser {
         )?;
         println!("reverse filter phase: {:?}", now.elapsed());
 
-        let mut file = File::create("img.ppm").unwrap();
-        file.write_all(b"P3 \n").unwrap();
-        file.write_all(format!("{} {} \n", self.width, self.height).as_bytes())
-            .unwrap();
-        file.write_all(b"255 \n").unwrap();
-        let mut i = 0;
-        while i < self.data.len() {
-            file.write_all(
-                format!(
-                    "{} {} {}\n",
-                    self.data[i],
-                    self.data[i + 1],
-                    self.data[i + 2]
-                )
-                .as_bytes(),
-            )
-            .unwrap();
-            i += 3;
-        }
+        write_img(
+            format!("img.ppm"),
+            self.width as usize,
+            self.height as usize,
+            num_components,
+            &self.data,
+        );
 
         Ok(())
     }
@@ -837,6 +799,53 @@ impl Parser {
                 let _crc = self.parse_u32()?;
                 Ok(())
             }
+        }
+    }
+}
+
+fn write_img(name: String, w: usize, h: usize, num_components: usize, data: &Vec<u8>) {
+    let mut file = File::create(name).unwrap();
+    file.write_all(b"P3 \n").unwrap();
+    file.write_all(format!("{} {} \n", w, h).as_bytes())
+        .unwrap();
+    file.write_all(b"255 \n").unwrap();
+    let mut i = 0;
+    while i < data.len() {
+        match num_components {
+            1 => {
+                file.write_all(format!("{} {} {} {}\n", data[i], data[i], data[i], 255).as_bytes())
+                    .unwrap();
+                i += 1;
+            }
+            2 => {
+                file.write_all(
+                    format!("{} {} {} {}\n", data[i], data[i], data[i], data[i + 1]).as_bytes(),
+                )
+                .unwrap();
+                i += 2;
+            }
+            3 => {
+                file.write_all(
+                    format!("{} {} {} {}\n", data[i], data[i + 1], data[i + 2], 255).as_bytes(),
+                )
+                .unwrap();
+                i += 3;
+            }
+            4 => {
+                file.write_all(
+                    format!(
+                        "{} {} {} {}\n",
+                        data[i],
+                        data[i + 1],
+                        data[i + 2],
+                        data[i + 3]
+                    )
+                    .as_bytes(),
+                )
+                .unwrap();
+                i += 4;
+            }
+            _ => panic!(),
         }
     }
 }
