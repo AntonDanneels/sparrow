@@ -842,7 +842,9 @@ impl Parser {
 }
 
 fn main() {
-    let f = std::fs::read("res/sparrow_bg.png");
+    let now = Instant::now();
+    let filename = std::env::args().nth(1).expect("Expected a filename");
+    let f = std::fs::read(filename);
 
     let f = match f {
         Ok(f) => f,
@@ -853,11 +855,12 @@ fn main() {
     let mut parser = Parser::new();
 
     match parser.parse(data) {
-        Ok(_) => {
-            println!("File parsed!");
-        }
+        Ok(_) => {}
         Err(e) => {
             println!("Failed to parse PNG: {}", e);
+            std::process::exit(-1);
         }
     }
+
+    println!("PNG parsing took: {:?}", now.elapsed());
 }
