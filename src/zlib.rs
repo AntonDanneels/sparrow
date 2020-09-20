@@ -47,6 +47,14 @@ impl<'a> BitBuffer<'a> {
         }
     }
 
+    fn reset(&mut self) {
+        while self.num_bits > 0 {
+            self.data.push_front((self.buffer & 0xff) as u8);
+            self.buffer >>= 8;
+            self.num_bits -= 8;
+        }
+    }
+
     fn get_n_bits(&mut self, n: u32) -> u16 {
         if self.num_bits < 24 {
             self.fill();
@@ -98,11 +106,19 @@ pub fn parse(data: &mut VecDeque<u8>) -> Result<Vec<u8>, String> {
         let b_type = buffer.get_n_bits(2);
         is_final = b_final != 0;
 
-        let mut hf_lit = HuffmanTree::new();
-        let mut hf_dist = HuffmanTree::new();
         if b_type == 0 {
-            println!("No compression");
-            panic!();
+            buffer.get_n_bits(5);
+            let nlen = buffer.get_n_bits(16);
+            let _nlen_inv = buffer.get_n_bits(16);
+            buffer.reset();
+
+            if buffer.data.len() < nlen as usize {
+                return Err("Not enough data or corrupt stream".to_string());
+            }
+
+            for _ in 0..nlen {
+                output.push(buffer.data.pop_front().unwrap());
+            }
         } else if b_type == 0b01 {
             let mut lits = vec![8; 144];
             lits.append(&mut vec![9; 256 - 144]);
@@ -111,8 +127,9 @@ pub fn parse(data: &mut VecDeque<u8>) -> Result<Vec<u8>, String> {
 
             let dists = vec![5; 32];
 
-            hf_lit = build_huffman_codes(&lits, true);
-            hf_dist = build_huffman_codes(&dists, true);
+            let hf_lit = build_huffman_codes(&lits, true);
+            let hf_dist = build_huffman_codes(&dists, true);
+            parse_block(&hf_lit, &hf_dist, &mut buffer, &mut output)?;
         } else if b_type == 0b10 {
             let h_lit = buffer.get_n_bits(5);
             let h_dist = buffer.get_n_bits(5);
@@ -129,12 +146,12 @@ pub fn parse(data: &mut VecDeque<u8>) -> Result<Vec<u8>, String> {
             let lits = fill_with_huffman(257 + h_lit as usize, &hf_codes, &mut buffer)?;
             let dists = fill_with_huffman(1 + h_dist as usize, &hf_codes, &mut buffer)?;
 
-            hf_lit = build_huffman_codes(&lits, true);
-            hf_dist = build_huffman_codes(&dists, true);
+            let hf_lit = build_huffman_codes(&lits, true);
+            let hf_dist = build_huffman_codes(&dists, true);
+            parse_block(&hf_lit, &hf_dist, &mut buffer, &mut output)?;
         } else if b_type == 0b11 {
             return Err("Invalid header in zlib stream".to_string());
         }
-        parse_block(&hf_lit, &hf_dist, &mut buffer, &mut output)?;
     }
 
     Ok(output)
