@@ -249,76 +249,11 @@ impl Parser {
         offset: usize,
     ) -> Result<Vec<u8>, String> {
         let mut result = Vec::with_capacity((self.width * self.height * channels as u32) as usize);
-
         let mut data = Vec::with_capacity(width * height * channels / 8 * depth);
         println!(
             "Reverse filter: {}x{}@{} ({})",
             width, height, depth, channels
         );
-        match depth {
-            1 | 2 | 4 => {
-                println!(
-                    "Processing {} bytes",
-                    (height /*filters*/ + ((width as f32 / 8.0 * depth as f32).ceil() as usize)* height * channels)
-                );
-                for y in 0..height {
-                    let row_index = y * ((width as f32 / 8.0 * depth as f32).ceil() as usize) + y;
-                    let filter = self.decoded_data[row_index + offset];
-                    println!(
-                        "filter: {}, width: {}",
-                        filter,
-                        ((width as f32 / 8.0 * depth as f32).ceil() as usize)
-                    );
-                    for x in 0..((width as f32 / 8.0 * depth as f32).ceil() as usize) {
-                        //println!("{} {:#0b}",self.decoded_data[row_index + x + 1 + offset],
-                        //                     self.decoded_data[row_index + x + 1 + offset]);
-                        let x = self.decoded_data[row_index + x + 1 + offset];
-                        match depth {
-                            1 => {
-                                for i in 0..std::cmp::min(width, 8) {
-                                    let index = (x >> (7 - i) & 0b1) as usize;
-                                    if self.colour_type == ColourType::Indexed {
-                                        data.push(self.plte[index].0);
-                                        data.push(self.plte[index].1);
-                                        data.push(self.plte[index].2);
-                                    } else {
-                                        data.push((x >> (7 - i) & 0b1) * 255);
-                                    }
-                                }
-                            }
-                            2 => {
-                                for i in 0..(std::cmp::min(width, 8 / 2)) {
-                                    let index = (x >> (6 - (i * 2)) & 0b11) as usize;
-                                    if self.colour_type == ColourType::Indexed {
-                                        data.push(self.plte[index].0);
-                                        data.push(self.plte[index].1);
-                                        data.push(self.plte[index].2);
-                                    } else {
-                                        data.push((x >> (6 - (i * 2)) & 0b11) * 85);
-                                    }
-                                }
-                            }
-                            4 => {
-                                for i in 0..(std::cmp::min(width, 8 / 4)) {
-                                    let index = (x >> (4 - (i * 4)) & 0b1111) as usize;
-                                    if self.colour_type == ColourType::Indexed {
-                                        data.push(self.plte[index].0);
-                                        data.push(self.plte[index].1);
-                                        data.push(self.plte[index].2);
-                                    } else {
-                                        data.push((x >> (4 - (i * 4)) & 0b1111) * 17);
-                                    }
-                                }
-                            }
-                            _ => panic!(),
-                        }
-                    }
-                }
-                return Ok(data);
-            }
-            8 => {}
-            _ => return Err("Not implemented".to_string()),
-        }
 
         let paeth_predictor = |a, b, c| -> u32 {
             let a = a as i32;
@@ -337,14 +272,22 @@ impl Parser {
             }
         };
 
+        println!(
+            "Processing {} bytes",
+            (height /*filters*/ + ((width as f32 / 8.0 * depth as f32).ceil() as usize) * height * channels)
+        );
+
         let mut p = Vec::with_capacity(channels as usize);
         for y in 0..(height) {
-            let row_index = y * width * channels + y;
-            let filter = self.decoded_data[(row_index + offset) as usize];
-            for x in 1..(width + 1) {
+            let bytes_to_process = (width as f32 / 8.0 * depth as f32).ceil() as usize;
+            let row_index = y * bytes_to_process * channels + y;
+            let filter = self.decoded_data[row_index + offset];
+            println!("filter: {}, width: {}", filter, bytes_to_process);
+            for x in 0..bytes_to_process {
+                let xx = row_index + x * channels + 1;
                 let a = |offset| -> u32 {
                     match x {
-                        1 => 0,
+                        0 => 0,
                         _ => {
                             result[(result.len() as u32 - channels as u32 + offset as u32) as usize]
                                 as u32
@@ -354,35 +297,31 @@ impl Parser {
                 let b = |offset| -> u32 {
                     match y {
                         0 => 0,
-                        _ => result[(result.len() - width * channels + offset) as usize] as u32,
+                        _ => {
+                            result[(result.len() - bytes_to_process * channels + offset) as usize]
+                                as u32
+                        }
                     }
                 };
                 let c = |offset| -> u32 {
                     match (x, y) {
-                        (1, 0) => 0,
-                        (1, _) => 0,
+                        (0, 0) => 0,
+                        (0, _) => 0,
                         (_, 0) => 0,
                         (_, _) => {
                             result[(result.len() as u32
-                                - width as u32 * channels as u32
+                                - (bytes_to_process * channels) as u32
                                 - channels as u32
                                 + offset as u32) as usize] as u32
                         }
                     }
                 };
 
-                let xx = row_index + (x - 1) * channels + 1;
                 match filter {
                     0 => {
                         for i in 0..channels {
                             let index = (xx + i + offset) as usize;
-                            if self.colour_type == ColourType::Indexed {
-                                result.push(self.plte[self.decoded_data[index] as usize].0);
-                                result.push(self.plte[self.decoded_data[index] as usize].1);
-                                result.push(self.plte[self.decoded_data[index] as usize].2);
-                            } else {
-                                result.push(self.decoded_data[index]);
-                            }
+                            result.push(self.decoded_data[index]);
                         }
                     }
                     1 => {
@@ -428,6 +367,65 @@ impl Parser {
                     }
                 }
             }
+        }
+
+        match depth {
+            1 | 2 | 4 => {
+                for i in 0..result.len() {
+                    let x = result[i];
+                    match depth {
+                        1 => {
+                            for i in 0..std::cmp::min(width, 8) {
+                                let index = (x >> (7 - i) & 0b1) as usize;
+                                if self.colour_type == ColourType::Indexed {
+                                    data.push(self.plte[index].0);
+                                    data.push(self.plte[index].1);
+                                    data.push(self.plte[index].2);
+                                } else {
+                                    data.push((x >> (7 - i) & 0b1) * 255);
+                                }
+                            }
+                        }
+                        2 => {
+                            for i in 0..(std::cmp::min(width, 8 / 2)) {
+                                let index = (x >> (6 - (i * 2)) & 0b11) as usize;
+                                if self.colour_type == ColourType::Indexed {
+                                    data.push(self.plte[index].0);
+                                    data.push(self.plte[index].1);
+                                    data.push(self.plte[index].2);
+                                } else {
+                                    data.push((x >> (6 - (i * 2)) & 0b11) * 85);
+                                }
+                            }
+                        }
+                        4 => {
+                            for i in 0..(std::cmp::min(width, 8 / 4)) {
+                                let index = (x >> (4 - (i * 4)) & 0b1111) as usize;
+                                if self.colour_type == ColourType::Indexed {
+                                    data.push(self.plte[index].0);
+                                    data.push(self.plte[index].1);
+                                    data.push(self.plte[index].2);
+                                } else {
+                                    data.push((x >> (4 - (i * 4)) & 0b1111) * 17);
+                                }
+                            }
+                        }
+                        _ => panic!(),
+                    }
+                }
+                return Ok(data);
+            }
+            8 => {
+                if self.colour_type == ColourType::Indexed {
+                    for i in 0..result.len() {
+                        data.push(self.plte[result[i] as usize].0);
+                        data.push(self.plte[result[i] as usize].1);
+                        data.push(self.plte[result[i] as usize].2);
+                    }
+                    return Ok(data);
+                }
+            }
+            _ => return Err("Not implemented".to_string()),
         }
 
         Ok(result)
