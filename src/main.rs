@@ -146,11 +146,6 @@ impl Parser {
             }
             _ => panic!(),
         };
-        match self.interlace {
-            0 => false,
-            1 => true,
-            _ => return Err("Invalid interlace method".to_string()),
-        };
 
         let visit = |image: &mut Vec<u8>, data: &Vec<u8>, x, y, w, h| {
             for yy in 0..h {
@@ -532,6 +527,10 @@ impl Parser {
         self.compression = self.parse_u8()?;
         self.filter = self.parse_u8()?;
         self.interlace = self.parse_u8()?;
+        match self.interlace {
+            0 | 1 => {}
+            _ => return Err("Invalid interlace method".to_string()),
+        };
 
         let _crc = self.parse_u32()?;
         Ok(())
