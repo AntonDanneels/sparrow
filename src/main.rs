@@ -375,7 +375,14 @@ impl Parser {
                 match filter {
                     0 => {
                         for i in 0..channels {
-                            result.push(self.decoded_data[(xx + i + offset) as usize]);
+                            let index = (xx + i + offset) as usize;
+                            if self.colour_type == ColourType::Indexed {
+                                result.push(self.plte[self.decoded_data[index] as usize].0);
+                                result.push(self.plte[self.decoded_data[index] as usize].1);
+                                result.push(self.plte[self.decoded_data[index] as usize].2);
+                            } else {
+                                result.push(self.decoded_data[index]);
+                            }
                         }
                     }
                     1 => {
