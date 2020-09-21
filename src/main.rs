@@ -38,6 +38,40 @@ const fn to_u32(a: [u8; 4]) -> u32 {
     result
 }
 
+const PNG_CRC_TABLE: [u64; 256] = make_crc_table();
+
+const fn make_crc_table() -> [u64; 256] {
+    let mut result: [u64; 256] = [0; 256];
+
+    let mut i = 0;
+    while i < 256 {
+        let mut c = i as u64;
+        let mut j = 0;
+        while j < 8 {
+            if (c & 1) != 0 {
+                c = 0xedb88320 ^ (c >> 1);
+            } else {
+                c = c >> 1;
+            }
+            j += 1;
+        }
+        result[i] = c;
+        i += 1;
+    }
+
+    result
+}
+
+fn calc_crc(data: &VecDeque<u8>, length: u32) -> u64 {
+    let mut result = 0xffffffff as u64;
+
+    for i in 0..length as usize {
+        result = PNG_CRC_TABLE[((result ^ data[i] as u64) & 0xff) as usize] ^ (result >> 8);
+    }
+
+    result ^ 0xffffffff
+}
+
 #[derive(Debug, PartialEq)]
 enum ColourType {
     Grayscale,
@@ -487,7 +521,6 @@ impl Parser {
         }
 
         let length = self.parse_u32()?;
-        let chunk_type = self.parse_u32()?;
 
         let headers: [(u32, ChunkType); 15] = [
             (to_u32([73, 72, 68, 82]), ChunkType::IHDR),
@@ -507,6 +540,17 @@ impl Parser {
             (to_u32([116, 82, 78, 83]), ChunkType::TRNS),
         ];
 
+        if self.compressed_data.len() < (length as usize + 4) {
+            return Err("Not enough data".to_string());
+        }
+        let crc1 = calc_crc(&self.compressed_data, length + 4);
+        let crc2 = self.peek_u32(length + 4)?;
+
+        if crc1 != crc2 as u64 {
+            return Err("Corrupted data".to_string());
+        }
+
+        let chunk_type = self.parse_u32()?;
         for header in &headers {
             if chunk_type == header.0 {
                 return Ok((header.1.clone(), length));
@@ -530,6 +574,19 @@ impl Parser {
         }
         for i in 0..4 {
             let byte = self.compressed_data.pop_front().unwrap() as u32;
+            result |= byte << 8 * (3 - i);
+        }
+
+        Ok(result)
+    }
+
+    fn peek_u32(&self, offset: u32) -> Result<u32, String> {
+        let mut result: u32 = 0;
+        if self.compressed_data.len() < (offset as usize + 4) {
+            return Err("Not enough data".to_string());
+        }
+        for i in 0..4 {
+            let byte = self.compressed_data[offset as usize + i] as u32;
             result |= byte << 8 * (3 - i);
         }
 
@@ -634,12 +691,12 @@ impl Parser {
         Ok(())
     }
 
-    fn parse_phys(&mut self, length: u32) -> Result<(), String> {
+    fn parse_phys(&mut self, _length: u32) -> Result<(), String> {
         let ppu_x = self.parse_u32()?;
         let ppu_y = self.parse_u32()?;
         let unit = self.parse_u8()?;
 
-        //println!("PPU: {}x{} ({})", ppu_x, ppu_y, unit);
+        println!("PPU: {}x{} ({})", ppu_x, ppu_y, unit);
 
         let _crc = self.parse_u32()?;
         Ok(())
@@ -858,6 +915,7 @@ impl Parser {
 
         let (chunk_type, length) = chunk_type.unwrap();
         println!("{:?}", chunk_type);
+
         match chunk_type {
             ChunkType::IHDR => self.parse_ihdr(length),
             ChunkType::IDAT => self.parse_idat(length),
