@@ -4,6 +4,7 @@ import subprocess
 from PIL import Image
 
 EXECUTABLE_PATH = "../target/release/sparrow"
+TEST_IMGS_DIR_NAME = "png_testsuite"
 
 def test_executable_exists():
     """
@@ -18,8 +19,7 @@ def test_executable_exists():
     assert not fail, "Executable not available"
 
 def get_image_names():
-    dir_name = "png_testsuite"
-    result = [dir_name + "/" + f for f in os.listdir(dir_name) if "png" in f]
+    result = [TEST_IMGS_DIR_NAME + "/" + f for f in os.listdir(TEST_IMGS_DIR_NAME) if "png" in f]
     result.sort()
 
     return result
@@ -37,6 +37,8 @@ def test_load_image(name):
         original = img.getdata()
     except:
         should_fail = True
+
+    should_fail = should_fail or name[len(TEST_IMGS_DIR_NAME + "/")] == 'x'
 
     result = subprocess.run([EXECUTABLE_PATH, name], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     assert (result.returncode != 0) == should_fail, "Image loading failed: {}".format(result.stderr)
