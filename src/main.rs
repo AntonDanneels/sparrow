@@ -1,6 +1,7 @@
 use std::time::Instant;
 
 mod png;
+mod jpeg;
 
 fn main() {
     let now = Instant::now();
@@ -13,7 +14,7 @@ fn main() {
     };
 
     let data: Vec<u8> = f.into_iter().collect();
-    let mut parser = png::Parser::new();
+    let mut parser = jpeg::Parser::new();
 
     match parser.parse(data) {
         Ok(_) => {}
