@@ -42,10 +42,8 @@ pub struct Parser {
     compressed_data: VecDeque<u8>,
     has_end: bool,
 
-    dequant_table:[[u16; 64]; 4], 
+    dequant_table: [[u16; 64]; 4],
 
-                         /*size, code, val*/
-    //hufftables: Vec<Vec<(u16, u16, u16)>>,
     dc_hufftables: Vec<HuffmanTree>,
     ac_hufftables: Vec<HuffmanTree>,
 
@@ -84,15 +82,10 @@ const fn to_u16(a: [u8; 2]) -> u16 {
     result
 }
 
-const DEZIGZAG:[usize; 64] = [
-    0,  1,  8, 16,  9,  2,  3, 10,
-   17, 24, 32, 25, 18, 11,  4,  5,
-   12, 19, 26, 33, 40, 48, 41, 34,
-   27, 20, 13,  6,  7, 14, 21, 28,
-   35, 42, 49, 56, 57, 50, 43, 36,
-   29, 22, 15, 23, 30, 37, 44, 51,
-   58, 59, 52, 45, 38, 31, 39, 46,
-   53, 60, 61, 54, 47, 55, 62, 63,
+const DEZIGZAG: [usize; 64] = [
+    0, 1, 8, 16, 9, 2, 3, 10, 17, 24, 32, 25, 18, 11, 4, 5, 12, 19, 26, 33, 40, 48, 41, 34, 27, 20,
+    13, 6, 7, 14, 21, 28, 35, 42, 49, 56, 57, 50, 43, 36, 29, 22, 15, 23, 30, 37, 44, 51, 58, 59,
+    52, 45, 38, 31, 39, 46, 53, 60, 61, 54, 47, 55, 62, 63,
 ];
 
 impl Parser {
@@ -103,8 +96,8 @@ impl Parser {
 
             dequant_table: [[0; 64]; 4],
 
-            dc_hufftables: Vec::new(), 
-            ac_hufftables: Vec::new(), 
+            dc_hufftables: Vec::new(),
+            ac_hufftables: Vec::new(),
             parsing_mode: ParsingMode::Invalid,
 
             depth: 0,
@@ -142,7 +135,6 @@ impl Parser {
             (to_u16([0xff, 0xE0]), ChunkType::APP0),
             (to_u16([0xff, 0xE1]), ChunkType::APP1),
             (to_u16([0xff, 0xE2]), ChunkType::APP2),
-
             (to_u16([0xff, 0xE3]), ChunkType::APP_UNKNOWN),
             (to_u16([0xff, 0xE4]), ChunkType::APP_UNKNOWN),
             (to_u16([0xff, 0xE5]), ChunkType::APP_UNKNOWN),
@@ -155,7 +147,6 @@ impl Parser {
             (to_u16([0xff, 0xEC]), ChunkType::APP_UNKNOWN),
             (to_u16([0xff, 0xED]), ChunkType::APP_UNKNOWN),
             (to_u16([0xff, 0xEF]), ChunkType::APP_UNKNOWN),
-
             (to_u16([0xff, 0xC4]), ChunkType::DHT),
             (to_u16([0xff, 0xDB]), ChunkType::DQT),
             (to_u16([0xff, 0xDA]), ChunkType::SOS),
@@ -170,7 +161,7 @@ impl Parser {
                 return Ok(marker.1.clone());
             }
         }
-    
+
         Err(format!("Not implemented"))
     }
 
@@ -185,7 +176,7 @@ impl Parser {
             ChunkType::SOS => self.parse_sos(),
             ChunkType::SOF0 => self.parse_sof0(),
             ChunkType::UNKNOWN => Err("Don't know what to do".to_string()),
-            _ => Err("Don't know what to do".to_string())
+            _ => Err("Don't know what to do".to_string()),
         }
     }
 
@@ -215,7 +206,11 @@ impl Parser {
         }
         println!("Version: {:#x}.{:#x}", self.parse_u8()?, self.parse_u8()?);
         println!("Units: {}", self.parse_u8()?);
-        println!("Xdense: {}, Ydense: {}", self.parse_u16()?, self.parse_u16()?);
+        println!(
+            "Xdense: {}, Ydense: {}",
+            self.parse_u16()?,
+            self.parse_u16()?
+        );
         let x_thumb = self.parse_u8()?;
         let y_thumb = self.parse_u8()?;
         println!("Xthumb: {}, Ythumb: {}", x_thumb, y_thumb);
@@ -271,7 +266,7 @@ impl Parser {
                 let qk = match pq {
                     0 => self.parse_u8()? as u16,
                     1 => self.parse_u16()?,
-                    _ => return Err(format!("Badly formed JPEG"))
+                    _ => return Err(format!("Badly formed JPEG")),
                 };
                 if i == 1 || i == 2 {
                     println!("DQT: {}", qk);
@@ -281,19 +276,19 @@ impl Parser {
             length -= match pq {
                 0 => 65,
                 1 => 129,
-                _ => length
-            }; 
+                _ => length,
+            };
         }
-    
+
         Ok(())
     }
 
     fn parse_sof0(&mut self) -> Result<(), String> {
         let mut length = self.parse_u16()?;
-        let p = self.parse_u8()?; 
-        let y = self.parse_u16()?; 
-        let x = self.parse_u16()?; 
-        let nf = self.parse_u8()?; 
+        let p = self.parse_u8()?;
+        let y = self.parse_u16()?;
+        let x = self.parse_u16()?;
+        let nf = self.parse_u8()?;
 
         println!("Length: {}", length);
         println!("{}x{}@{}", x, y, p);
@@ -307,11 +302,11 @@ impl Parser {
 
         length -= 2 + 1 + 2 + 2 + 1;
         while length > 0 {
-            let ci = self.parse_u8()?; 
-            let h = self.parse_u8()?; 
+            let ci = self.parse_u8()?;
+            let h = self.parse_u8()?;
             let hi = h >> 4;
             let vi = h & 0b1111;
-            let tqi = self.parse_u8()?; 
+            let tqi = self.parse_u8()?;
 
             let c = Component::new(ci, hi, vi, tqi as usize);
             self.components.push(c);
@@ -394,6 +389,9 @@ impl Parser {
             let mut tree = HuffmanTree::new();
             for i in 0..size as usize {
                 let vlj = self.parse_u8()?;
+                if th == 0 && tc == 0 {
+                    println!("{:#0b}", code[i]);
+                }
                 tree.insert(code[i] as u16, sizes[i] as u16, vlj as u32);
             }
 
@@ -404,17 +402,17 @@ impl Parser {
             match tc {
                 0 => {
                     if th as usize >= self.dc_hufftables.len() {
-                        self.dc_hufftables.resize_with(4, || { HuffmanTree::new() });
+                        self.dc_hufftables.resize_with(4, || HuffmanTree::new());
                     }
                     self.dc_hufftables[th as usize] = tree;
                 }
                 1 => {
                     if th as usize >= self.ac_hufftables.len() {
-                        self.ac_hufftables.resize_with(4, || { HuffmanTree::new() });
+                        self.ac_hufftables.resize_with(4, || HuffmanTree::new());
                     }
                     self.ac_hufftables[th as usize] = tree;
                 }
-                _ => return Err("Corrupted data (DHT)".to_string())
+                _ => return Err("Corrupted data (DHT)".to_string()),
             }
 
             length -= 17 + size;
@@ -457,7 +455,7 @@ impl Parser {
         let al = a & 0b1111;
 
         match self.parsing_mode {
-            ParsingMode::Baseline => {},
+            ParsingMode::Baseline => {}
             ParsingMode::Invalid => {
                 return Err("Corrupted image".to_string());
             }
@@ -475,9 +473,9 @@ impl Parser {
         println!("{:#0b}", self.parse_u8()?);
         println!("{:#0b}", self.parse_u8()?);
         */
-        
+
         //FIXME: remove clones
-        let mut data = self.compressed_data.clone(); 
+        let mut data = self.compressed_data.clone();
         let mut bitbuffer = BitBuffer::new(&mut data);
         let component = self.components[comp_order[0]].clone();
         self.parse_block(&mut bitbuffer, &component);
@@ -486,8 +484,12 @@ impl Parser {
     }
 
     fn extend_receive(buffer: &mut BitBuffer, val: u32) -> i16 {
+        if val == 0 {
+            return 0;
+        }
+
         let mut result = buffer.get_n_bits(val) as i16;
-        let vt = 1 << (val - 1); 
+        let vt = 1 << (val - 1);
         if result < vt {
             result += (-1 << val) + 1;
         }
@@ -497,10 +499,35 @@ impl Parser {
 
     fn parse_block(&mut self, buffer: &mut BitBuffer, component: &Component) {
         //Parse DC coeff
-        
+
+        println!("{:#0b}", buffer.data[0]);
         let val = self.dc_hufftables[component.dc_table].find(buffer).unwrap();
         let result = Parser::extend_receive(buffer, val);
-        println!("Receive+extend: {:?}", result);
+        //println!("Receive+extend: {:?}", result);
+
+        //TODO: dequant
+
+        //Parse AC coeff
+        let mut k = 0;
+        while k < 64 {
+            let rs = self.ac_hufftables[component.ac_table].find(buffer).unwrap();
+            let r = rs >> 4;
+            let s = rs & 0b1111;
+
+            if s == 0 {
+                if r == 15 {
+                    k += 16;
+                } else {
+                    break;
+                }
+            } else {
+                k += r;
+                let result = Parser::extend_receive(buffer, s);
+                //TODO dequant
+                //TODO dezigzag
+                //println!("Receive+extend AC: {:?}", result);
+            }
+        }
     }
 
     pub fn parse(&mut self, data: Vec<u8>) -> Result<(), String> {
@@ -517,7 +544,7 @@ impl Parser {
             }
             println!("-------------------------------------------");
         }
-    
+
         Err(format!("Not impl"))
     }
 }
@@ -647,11 +674,9 @@ impl HuffmanTree {
     }
 
     fn insert(&mut self, code: u16, bit_length: u16, val: u32) -> bool {
-        let mut c = code;
         let mut current_node = 0;
-        for _ in 0..bit_length {
-            let bit = c & 0b1;
-            c >>= 1;
+        for i in 0..bit_length {
+            let bit = (code >> (bit_length - 1 - i)) & 0b1;
 
             if bit > 0 {
                 if self.nodes[current_node].right.is_none() {
