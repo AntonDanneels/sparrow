@@ -17,15 +17,17 @@ enum ParsingMode {
 #[derive(Debug, Clone)]
 struct Component {
     identifier: u8,
-    sampling_hor: u8,
-    sampling_ver: u8,
+    sampling_hor: usize,
+    sampling_ver: usize,
     quant_table: usize,
     dc_table: usize,
     ac_table: usize,
+    width: usize,
+    height: usize,
 }
 
 impl Component {
-    fn new(identifier: u8, sampling_hor: u8, sampling_ver: u8, quant_table: usize) -> Component {
+    fn new(identifier: u8, sampling_hor: usize, sampling_ver: usize, quant_table: usize) -> Component {
         Component {
             identifier: identifier,
             sampling_hor: sampling_hor,
@@ -33,6 +35,8 @@ impl Component {
             quant_table: quant_table,
             dc_table: 0,
             ac_table: 0,
+            width: 0,
+            height: 0,
         }
     }
 }
@@ -301,22 +305,32 @@ impl Parser {
         self.parsing_mode = ParsingMode::Baseline;
 
         length -= 2 + 1 + 2 + 2 + 1;
+        let mut max_h = 0;
+        let mut max_v = 0;
         while length > 0 {
             let ci = self.parse_u8()?;
             let h = self.parse_u8()?;
-            let hi = h >> 4;
-            let vi = h & 0b1111;
+            let hi = (h >> 4) as usize;
+            let vi = (h & 0b1111) as usize;
             let tqi = self.parse_u8()?;
+
+            if hi > max_h {
+                max_h = hi;
+            }
+            if vi > max_v {
+                max_v = vi;
+            }
 
             let c = Component::new(ci, hi, vi, tqi as usize);
             self.components.push(c);
 
-            println!("\tci: {}", ci);
-            println!("\thi: {}, vi: {}", hi, vi);
-            println!("\ttqi: {}", tqi);
-            println!("\t--------------------");
-
             length -= 1 + 1 + 1;
+        }
+
+        for component in &mut self.components {
+            component.width = self.width * component.sampling_hor / max_h;
+            component.height = self.height * component.sampling_ver / max_v;
+            println!("\t{:?}", component);
         }
 
         Ok(())
@@ -389,8 +403,8 @@ impl Parser {
             let mut tree = HuffmanTree::new();
             for i in 0..size as usize {
                 let vlj = self.parse_u8()?;
-                if th == 0 && tc == 0 {
-                    println!("{:#0b}", code[i]);
+                if tc == 1 {
+                    println!("{} ({:#0b}) = {}", code[i], code[i], vlj);
                 }
                 tree.insert(code[i] as u16, sizes[i] as u16, vlj as u32);
             }
@@ -422,7 +436,7 @@ impl Parser {
     }
 
     fn parse_sos(&mut self) -> Result<(), String> {
-        let mut length = self.parse_u16()? - 2;
+        let length = self.parse_u16()? - 2;
         println!("Length: {}", length);
 
         let ns = self.parse_u8()?;
@@ -466,19 +480,42 @@ impl Parser {
 
         println!("ss: {}, se: {}, ah: {}, al: {}", ss, se, ah, al);
 
-        println!("{:?}", self.components[comp_order[0]]);
-
-        /*
-        println!("{:#0b}", self.parse_u8()?);
-        println!("{:#0b}", self.parse_u8()?);
-        println!("{:#0b}", self.parse_u8()?);
-        */
+        match ns {
+            1 => return Err(format!("Not impl")),
+            _ => {}
+        }
 
         //FIXME: remove clones
         let mut data = self.compressed_data.clone();
         let mut bitbuffer = BitBuffer::new(&mut data);
-        let component = self.components[comp_order[0]].clone();
-        self.parse_block(&mut bitbuffer, &component);
+
+        let w = (self.width as  f32 / 8.0).ceil() as usize;
+        let h = (self.height as  f32 / 8.0).ceil() as usize;
+
+        println!("{}x{}", w, h);
+
+        for i in 0..h {
+            for j in 0..w {
+                // Parse one MCU
+                for order in &comp_order {
+                    let component = &self.components[comp_order[*order]];
+
+                    //println!("{:?}", component);
+
+                    for x in 0..component.sampling_ver {
+                        for y in 0..component.sampling_hor {
+                            println!("parse_block: {} {} {}",
+                                     i, j, order);
+                            self.parse_block(&mut bitbuffer, component);
+                        }
+                    }
+                    if i == 0 && j == 3{
+                        return Err(format!(":("));
+                    }
+                }
+            }
+            println!("---------------------");
+        }
 
         Ok(())
     }
@@ -488,6 +525,7 @@ impl Parser {
             return 0;
         }
 
+        println!("Receive: {}", val);
         let mut result = buffer.get_n_bits(val) as i16;
         let vt = 1 << (val - 1);
         if result < vt {
@@ -497,37 +535,45 @@ impl Parser {
         result
     }
 
-    fn parse_block(&mut self, buffer: &mut BitBuffer, component: &Component) {
+    fn parse_block(&self, buffer: &mut BitBuffer, component: &Component) {
+        //println!("\tParsing block");
         //Parse DC coeff
-
-        println!("{:#0b}", buffer.data[0]);
         let val = self.dc_hufftables[component.dc_table].find(buffer).unwrap();
         let result = Parser::extend_receive(buffer, val);
-        //println!("Receive+extend: {:?}", result);
+        println!("DC: {:?}", result);
 
         //TODO: dequant
 
         //Parse AC coeff
-        let mut k = 0;
-        while k < 64 {
+        let mut k = 1;
+        loop {
             let rs = self.ac_hufftables[component.ac_table].find(buffer).unwrap();
+            println!("RS: {} ", rs);
             let r = rs >> 4;
             let s = rs & 0b1111;
 
             if s == 0 {
                 if r == 15 {
                     k += 16;
+                    continue;
                 } else {
                     break;
                 }
-            } else {
-                k += r;
-                let result = Parser::extend_receive(buffer, s);
-                //TODO dequant
-                //TODO dezigzag
-                //println!("Receive+extend AC: {:?}", result);
             }
+            k += r;
+            let result = Parser::extend_receive(buffer, s);
+            //TODO dequant
+            //TODO dezigzag
+            //println!("Receive+extend AC({}): {:?} ({}; {}, {})",
+            //         k, result, rs, r, s);
+            println!("AC: {}", result);
+
+            if k == 63 {
+                break;
+            }
+            k += 1;
         }
+        println!("k: {}", k);
     }
 
     pub fn parse(&mut self, data: Vec<u8>) -> Result<(), String> {
@@ -565,11 +611,13 @@ impl<'a> BitBuffer<'a> {
     }
 
     fn fill(&mut self) {
-        while self.num_bits < 24 {
+        while self.num_bits + 8 < 32 {
             if self.data.len() == 0 {
                 break;
             }
-            self.buffer |= (self.data.pop_front().unwrap().reverse_bits() as u32) << self.num_bits;
+            let byte = self.data.pop_front().unwrap().reverse_bits() as u32;
+            println!("{:#0b}", byte);
+            self.buffer |= byte << self.num_bits;
             self.num_bits += 8;
         }
     }
@@ -638,9 +686,10 @@ impl HuffmanTree {
         let mut current_node = 0;
 
         let mut i = 0;
-        if buffer.num_bits < 24 {
+        if buffer.num_bits < 32 {
             buffer.fill();
         }
+        println!("{:#0b}", buffer.buffer);
         loop {
             let c = (buffer.buffer >> i) & 0b1;
             i += 1;
